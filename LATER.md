@@ -21,6 +21,16 @@ the current milestone passes its gate.
 - **Named versions:** let people label a version ("before the redesign") and jump to it.
 - **Coalesce drag deltas in the outbox:** a drag pushes ~60 deltas/s. Consecutive LWW writes
   to the same keys could be merged before sending.
+- **Collaborative text inside notes:** labels are last-writer-wins strings. Two people
+  typing in the same note at once → one wins. The Fugue text CRDT (M3) is built and tested;
+  wiring it into notes (per-character inserts, cursors) is the next step.
+- **Text rendering at high zoom:** labels are canvas text textures and blur when zoomed far
+  in. Use MSDF/bitmap fonts, or re-render at zoom thresholds.
+- **AI: smarter organize:** gemma3:4b sometimes uses many columns for few notes (6 for 8).
+  Steer with a "max columns ≈ notes/2" hint, or let the user pick the columns.
+- **AI: connectors/diagrams:** the plan schema is columns only. Flowcharts need shapes +
+  edges in the document model first.
+- **AI: model choice in the UI** (env vars only today: VITE_OLLAMA_URL, VITE_OLLAMA_MODEL).
 - **Sign-in UI:** the server verifies tokens, and the web app passes `?token=`, but there's
   no login screen or token-issuing backend yet. Viewers also see editing tools that the
   server will reject; the UI should go read-only for them.

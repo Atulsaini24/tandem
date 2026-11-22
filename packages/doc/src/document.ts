@@ -40,6 +40,8 @@ export interface ShapeProps {
   readonly h: number;
   /** 0xRRGGBB */
   readonly fill: number;
+  /** Text shown on the shape (sticky notes, AI boards). Last writer wins. */
+  readonly label?: string;
 }
 
 export interface ShapeView extends ShapeProps {
@@ -71,7 +73,8 @@ export interface UndoResult {
   readonly skipped: number;
 }
 
-const PROP_KEYS = ["kind", "x", "y", "w", "h", "fill"] as const satisfies ReadonlyArray<keyof ShapeProps>;
+const PROP_KEYS = ["kind", "x", "y", "w", "h", "fill", "label"] as const satisfies ReadonlyArray<keyof ShapeProps>;
+export const MAX_LABEL_CHARS = 500;
 const MAX_UNDO = 200;
 
 /** Every shape id a delta touches: its structure, its properties, or both. */
@@ -101,6 +104,10 @@ export function validatePatch(patch: Partial<ShapeProps>): void {
   if (fill !== undefined && !(Number.isInteger(fill) && fill >= 0 && fill <= 0xffffff)) {
     throw new RangeError("fill must be an integer 0x000000–0xFFFFFF");
   }
+  const label = patch.label;
+  if (label !== undefined && (typeof label !== "string" || Array.from(label).length > MAX_LABEL_CHARS)) {
+    throw new RangeError(`label must be a string of at most ${MAX_LABEL_CHARS} characters`);
+  }
 }
 
 /**
@@ -113,7 +120,8 @@ function readShape(id: NodeId, props: LWWMap<PropValue>): ShapeView | undefined 
   if (kind !== "rect" && kind !== "ellipse") return undefined;
   if (typeof x !== "number" || typeof y !== "number") return undefined;
   if (typeof w !== "number" || typeof h !== "number" || typeof fill !== "number") return undefined;
-  return { id, kind, x, y, w, h, fill };
+  const label = props.get("label");
+  return typeof label === "string" && label.length > 0 ? { id, kind, x, y, w, h, fill, label } : { id, kind, x, y, w, h, fill };
 }
 
 // --- Selective undo ----------------------------------------------------------
@@ -287,7 +295,12 @@ export class CanvasDocument {
       validatePatch(target);
       const live = current.get(id);
       const patch: Partial<Record<keyof ShapeProps, PropValue>> = {};
-      for (const key of PROP_KEYS) if (live?.[key] !== target[key]) patch[key] = target[key];
+      for (const key of PROP_KEYS) {
+        // A label that didn't exist in the version is cleared (empty = no label).
+        const wanted = key === "label" ? (target.label ?? "") : target[key];
+        const current = key === "label" ? (live?.label ?? "") : live?.[key];
+        if (live === undefined || current !== wanted) patch[key] = wanted;
+      }
       if (Object.keys(patch).length > 0) props.push([id, this.#write(id, patch as Partial<ShapeProps>, changes)]);
       // positions is empty only when every version shape is already live in the same
       // order: then structure is untouched. Otherwise every shape gets a fresh position

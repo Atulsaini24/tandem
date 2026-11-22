@@ -42,6 +42,10 @@ export class Controller {
     this.#on(canvas, "pointerleave", () => this.#editor.updatePointer(null));
     this.#on(canvas, "wheel", (e) => this.#wheel(e), { passive: false });
     this.#on(canvas, "contextmenu", (e) => e.preventDefault());
+    this.#on(canvas, "dblclick", (e) => {
+      const hit = hitTest(this.#editor.scene.ordered(), this.#editor.renderer.screenToWorld(this.#point(e)));
+      if (hit !== undefined) this.#editor.startEditing(hit);
+    });
     this.#onWindow("keydown", (e) => this.#keyDown(e));
     this.#onWindow("keyup", (e) => this.#keyUp(e));
     this.#onWindow("blur", () => (this.#space = false));
@@ -64,6 +68,10 @@ export class Controller {
       return;
     }
     if (e.button !== 0) return;
+    if (ui.tool === "note") {
+      this.#editor.createNote(world);
+      return;
+    }
     if (ui.tool !== "select") {
       this.#editor.createShape(ui.tool, world);
       return;
@@ -147,6 +155,7 @@ export class Controller {
 
   #keyDown(e: KeyboardEvent): void {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (useUiStore.getState().editing) return; // typing a label
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === " ") {
       e.preventDefault();
@@ -174,7 +183,7 @@ export class Controller {
     } else if (e.key === "]") {
       this.#editor.bringSelectionToFront();
     } else if (!mod && !e.altKey) {
-      const tool = ({ v: "select", r: "rect", o: "ellipse" } as const)[e.key.toLowerCase() as "v" | "r" | "o"];
+      const tool = ({ v: "select", r: "rect", o: "ellipse", n: "note" } as const)[e.key.toLowerCase() as "v" | "r" | "o" | "n"];
       if (tool) useUiStore.getState().setTool(tool);
     }
   }

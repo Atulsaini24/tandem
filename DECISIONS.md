@@ -376,6 +376,50 @@ real `SyncClient` against real server processes, measures end-to-end latency, an
 any document diverged. It also reports its own event-loop delay, so an overloaded
 generator can't pass itself off as a slow server.
 
+## D043 — Local AI: the model writes content, code writes geometry
+The assistant runs on Ollama on the user's own machine (default `gemma3:4b`, 3.3 GB), so
+prompts and boards never leave it and nothing costs money per request. The model is asked
+for a **board plan** (title, columns, item texts) through a JSON schema that Ollama enforces
+during decoding. It never produces coordinates: small models are good at content and bad
+at geometry. `layout.ts` places cards deterministically, and a property test shows that no
+two cards ever overlap, whatever the model outputs.
+
+## D044 — Stream the plan, place cards as they finish
+At ~12 tokens/s on this CPU, a board takes 15–40 s. An incremental JSON parser
+(`json-stream.ts`) reports each value the moment it's complete, so each card lands as soon
+as its `}` streams in. Measured on the real model: **first card 3–5 s after asking** (18 s
+when the model first has to load), full board 12–38 s. A card's position depends only on its
+(column, index), so it can be placed before the rest of the board exists. The parser
+is property-tested: for any JSON, cut at random points, it reports exactly what
+`JSON.parse` sees, with correct paths.
+
+## D045 — The model's output is untrusted input
+Everything is cleaned before it can become an edit: control characters stripped, text
+capped, colors limited to the palette, at most 6 columns × 10 cards, note references
+checked (an integer, in range, used once). A property feeds arbitrary JSON through the
+reader. The model never touches the CRDT. Its events become ordinary local edits in one
+undo group: they sync to collaborators like anyone's edits, and **one Ctrl+Z removes the
+whole result** (verified in the browser: 16 shapes → 0 → 16).
+
+## D046 — "Organize" refers to notes by NUMBER (found by evaluating the real model)
+The first design let the model write organize items as `{text, source}`. All unit tests
+passed. But the real-model eval (`pnpm --filter @canvas/ai eval`) showed gemma3:4b
+copying each note's text and never setting `source`: **0 of 8 notes placed and 8 duplicate
+cards** that the app would have accepted as "new ideas". Fix: organize mode uses its own
+schema in which columns hold only note numbers, so constrained decoding makes copying
+impossible, and the card text comes from the user's note, never from the model. Result:
+**8 of 8 placed**, 0 duplicates; in the browser, 7 of 7 notes moved and none were
+duplicated. A regression test pins the exact failure. Lesson: tests prove the pipeline is
+*safe* with any output; only an eval against the real model shows whether the output is
+*good*.
+
+## D047 — Mutation checks must compile
+During M9 two "mutations" deleted a line and left a dangling `else`. The test file then
+failed to load, which looked like a caught bug but proved nothing. Mutations now replace
+code with valid code (e.g. `index += 1` → `index += 0`), and a result only counts if
+specific named tests fail. Re-checked: every earlier milestone's mutations failed named
+tests, so they were real.
+
 ## D013 — Tree correctness is checked against a reference implementation
 The test oracle is a 10-line naive version: sort every op by timestamp, replay from empty,
 skip cycles. The real engine must equal it for every delivery order. Mutation checks:

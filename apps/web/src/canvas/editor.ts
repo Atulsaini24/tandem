@@ -1,4 +1,5 @@
-import type { NodeId, ShapeKind, ShapeProps, ShapeView } from "@canvas/doc";
+import { MAX_LABEL_CHARS, type NodeId, type ShapeKind, type ShapeProps, type ShapeView } from "@canvas/doc";
+import { AiRunner } from "./ai-runner";
 import { EngineClient } from "../engine/engine-client";
 import type { EngineEvent } from "../engine/protocol";
 import { useUiStore, type BenchResult } from "../state/ui-store";
@@ -10,6 +11,7 @@ import { Scene } from "./scene";
 import type { Point } from "./viewport";
 
 const PALETTE = [0x2f63ff, 0xef6b3a, 0x1e8f5a, 0x7b55e7, 0xdd4f78, 0x137d77, 0xc6513c, 0x111318];
+const NOTE_FILL = 0xf2c94c;
 const STATS_INTERVAL_MS = 500;
 const FRAME_WINDOW = 120;
 /** ~25 presence updates/s; receivers interpolate between them. */
@@ -68,6 +70,7 @@ export class Editor {
   readonly peers = new Peers();
   readonly engine = new EngineClient();
   readonly renderer: Renderer;
+  readonly ai: AiRunner = new AiRunner(this);
   #controller: Controller | undefined;
   readonly #unsubscribe: Array<() => void> = [];
   #docId = "default";
@@ -150,6 +153,7 @@ export class Editor {
     // can finish tearing down after the surviving one has registered itself.
     if (Reflect.get(globalThis, "__editor") === this) Reflect.deleteProperty(globalThis, "__editor");
     document.removeEventListener("visibilitychange", this.#onHidden);
+    this.ai.cancel();
     clearTimeout(this.#flushTimer);
     clearTimeout(this.#presenceTimer);
     this.#controller?.destroy();
@@ -172,6 +176,59 @@ export class Editor {
   updatePointer(world: Point | null): void {
     this.#pointer = world;
     this.#schedulePresence();
+  }
+
+  /** A yellow sticky note at `center`, opened for typing straight away. */
+  createNote(center: Point): void {
+    if (this.scene.previewing) return;
+    const props: ShapeProps = { kind: "rect", x: center.x - 110, y: center.y - 42, w: 220, h: 84, fill: NOTE_FILL };
+    const id = crypto.randomUUID();
+    const seq = this.engine.nextSeq();
+    this.scene.addLocal([{ id, ...props }], seq);
+    this.engine.send({ type: "create", seq, shapes: [{ id, props }] });
+    this.select([id]);
+    useUiStore.getState().setTool("select");
+    this.startEditing(id);
+  }
+
+  startEditing(id: NodeId): void {
+    if (this.scene.previewing || !this.scene.get(id)) return;
+    this.select([id]);
+    useUiStore.getState().setEditing(id);
+  }
+
+  setLabel(id: NodeId, label: string): void {
+    const current = this.scene.get(id);
+    if (!current || (current.label ?? "") === label) return;
+    const seq = this.engine.nextSeq();
+    const patch = { label: Array.from(label).slice(0, MAX_LABEL_CHARS).join("") };
+    this.scene.updateLocal([{ id, patch }], seq);
+    this.engine.send({ type: "update", seq, updates: [{ id, patch }] });
+  }
+
+  /** AI: add a card, fading in (all cards of one AI run share `group`: one undo step). */
+  aiCreate(props: ShapeProps, group: number): NodeId {
+    const id = crypto.randomUUID();
+    const seq = this.engine.nextSeq();
+    this.scene.animate = true;
+    this.scene.addLocal([{ id, ...props }], seq);
+    this.engine.send({ type: "create", seq, shapes: [{ id, props }], group });
+    return id;
+  }
+
+  /** AI: glide an existing shape into a slot. */
+  aiMove(id: NodeId, rect: { x: number; y: number; w: number; h: number }, group: number): void {
+    if (!this.scene.get(id)) return;
+    const seq = this.engine.nextSeq();
+    const patch = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+    this.scene.animate = true;
+    this.scene.updateLocal([{ id, patch }], seq);
+    this.engine.send({ type: "update", seq, updates: [{ id, patch }], group });
+  }
+
+  fitTo(rect: { x: number; y: number; w: number; h: number }): void {
+    // The AI panel (340px + margins) covers the right edge while open.
+    this.renderer.fitTo(rect, 80, useUiStore.getState().aiOpen ? 372 : 0);
   }
 
   createShape(kind: ShapeKind, center: Point): void {

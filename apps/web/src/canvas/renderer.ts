@@ -15,6 +15,14 @@ interface Tween {
 }
 
 const TWEEN_MS = 320;
+
+/** Dark text on light fills, white on dark ones (perceived luminance). */
+function labelColor(fill: number): number {
+  const r = (fill >> 16) & 0xff;
+  const g = (fill >> 8) & 0xff;
+  const b = fill & 0xff;
+  return 0.299 * r + 0.587 * g + 0.114 * b > 165 ? 0x111318 : 0xffffff;
+}
 const easeOutCubic = (t: number): number => 1 - (1 - t) ** 3;
 
 interface CursorView {
@@ -71,11 +79,16 @@ export class Renderer {
   readonly #overlay = new Graphics();
   readonly #sprites = new Map<NodeId, Sprite>();
   readonly #tweens = new Map<Sprite, Tween>();
+  /** Labels live on their own layer above all shapes, positioned to follow their sprite. */
+  readonly #labels = new Container();
+  readonly #texts = new Map<NodeId, Text>();
+  readonly #spriteIds = new WeakMap<Sprite, NodeId>();
   #grid: TilingSprite | undefined;
   #circle: Texture | undefined;
   #dot: Texture | undefined;
   #zoomTarget = 1;
   #zoomAnchor: Point = { x: 0, y: 0 };
+  #flight: { from: Viewport; to: Viewport; elapsed: number } | undefined;
   #overlayDirty = true;
   #lastSelection: ReadonlySet<NodeId> | undefined;
   #marquee: Rect | undefined;
@@ -113,7 +126,7 @@ export class Renderer {
 
     // No Pixi hit-testing: we do our own (see hit-test.ts).
     this.app.stage.eventMode = "none";
-    this.#world.addChild(this.#layer, this.#overlay);
+    this.#world.addChild(this.#layer, this.#labels, this.#overlay);
     // Cursors live above the world, in screen space.
     this.app.stage.addChild(this.#grid, this.#world, this.#cursorLayer);
 
@@ -130,6 +143,7 @@ export class Renderer {
   }
 
   panBy(dx: number, dy: number): void {
+    this.#flight = undefined; // the user grabbing the canvas wins over any camera animation
     this.viewport = panBy(this.viewport, dx, dy);
     this.#overlayDirty = true;
   }
@@ -140,8 +154,39 @@ export class Renderer {
   }
 
   setZoomTarget(zoom: number, anchor: Point): void {
+    this.#flight = undefined;
     this.#zoomTarget = clampZoom(zoom);
     this.#zoomAnchor = anchor;
+  }
+
+  /**
+   * Animate the camera so `rect` (world coordinates) fills the view, never zooming past
+   * 100%. `insetRight` keeps it clear of a panel covering the right edge.
+   */
+  fitTo(rect: Rect, padding = 80, insetRight = 0): void {
+    const { height } = this.screen;
+    const width = Math.max(200, this.screen.width - insetRight);
+    const zoom = clampZoom(Math.min(1, (width - padding * 2) / rect.w, (height - padding * 2) / rect.h));
+    const target: Viewport = {
+      zoom,
+      x: width / 2 - (rect.x + rect.w / 2) * zoom,
+      y: height / 2 - (rect.y + rect.h / 2) * zoom,
+    };
+    this.#flight = { from: this.viewport, to: target, elapsed: 0 };
+    this.#zoomTarget = zoom;
+  }
+
+  #stepFlight(dtMs: number): void {
+    const flight = this.#flight;
+    if (!flight) return;
+    flight.elapsed += dtMs;
+    const t = easeOutCubic(Math.min(1, flight.elapsed / 650));
+    const { from, to } = flight;
+    // Zoom in log space; position follows so the motion reads as one camera move.
+    const zoom = Math.exp(Math.log(from.zoom) + (Math.log(to.zoom) - Math.log(from.zoom)) * t);
+    this.viewport = { zoom, x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+    this.#overlayDirty = true;
+    if (flight.elapsed >= 650) this.#flight = undefined;
   }
 
   set marquee(rect: Rect | undefined) {
@@ -158,7 +203,8 @@ export class Renderer {
   }
 
   #frame(dtMs: number): void {
-    if (this.viewport.zoom !== this.#zoomTarget) {
+    if (this.#flight) this.#stepFlight(dtMs);
+    else if (this.viewport.zoom !== this.#zoomTarget) {
       this.viewport = stepZoom(this.viewport, this.#zoomTarget, this.#zoomAnchor, dtMs);
       this.#overlayDirty = true;
     }
@@ -207,6 +253,7 @@ export class Renderer {
     for (const id of scene.dirty) {
       const view = scene.get(id);
       let sprite = this.#sprites.get(id);
+      this.#syncLabel(id, view);
       if (!view) {
         if (!sprite) continue;
         this.#sprites.delete(id);
@@ -222,6 +269,7 @@ export class Renderer {
       if (!sprite) {
         sprite = new Sprite();
         this.#sprites.set(id, sprite);
+        this.#spriteIds.set(sprite, id);
         this.#layer.addChild(sprite);
         this.#applyView(sprite, view);
         if (animate) {
@@ -269,6 +317,7 @@ export class Renderer {
       sprite.position.set(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
       sprite.setSize(from.w + (to.w - from.w) * t, from.h + (to.h - from.h) * t);
       sprite.alpha = from.alpha + (to.alpha - from.alpha) * t;
+      this.#placeLabel(sprite);
       if (tween.elapsed < TWEEN_MS) continue;
       this.#tweens.delete(sprite);
       if (tween.dispose) {
@@ -279,11 +328,69 @@ export class Renderer {
   }
 
   #applyView(sprite: Sprite, view: ShapeView): void {
-    this.#tweens.delete(sprite); // a direct update wins over any running animation
+    const running = this.#tweens.get(sprite);
+    const sameTarget =
+      running && !running.dispose && running.to.x === view.x && running.to.y === view.y && running.to.w === view.w && running.to.h === view.h;
+    if (sameTarget) {
+      // The worker confirming the position this sprite is already animating to: let the
+      // animation finish instead of snapping to the end (AI cards fly in this way).
+      this.#applyLook(sprite, view);
+      return;
+    }
+    this.#tweens.delete(sprite); // a different direct update wins over the animation
     this.#applyLook(sprite, view);
     sprite.alpha = 1;
     sprite.position.set(view.x, view.y);
     sprite.setSize(view.w, view.h);
+    this.#placeLabel(sprite);
+  }
+
+  /** Create, update or remove a shape's label. */
+  #syncLabel(id: NodeId, view: ShapeView | undefined): void {
+    let text = this.#texts.get(id);
+    if (!view?.label) {
+      if (text) {
+        this.#labels.removeChild(text);
+        text.destroy();
+        this.#texts.delete(id);
+      }
+      return;
+    }
+    const fill = labelColor(view.fill);
+    const wrap = Math.max(24, view.w - 22);
+    if (!text) {
+      text = new Text({
+        text: view.label,
+        resolution: 2,
+        style: {
+          fontFamily: "Inter, Helvetica Neue, Arial, sans-serif",
+          fontSize: 15,
+          fontWeight: "600",
+          lineHeight: 19,
+          fill,
+          wordWrap: true,
+          breakWords: true,
+          wordWrapWidth: wrap,
+        },
+      });
+      this.#texts.set(id, text);
+      this.#labels.addChild(text);
+    } else {
+      if (text.text !== view.label) text.text = view.label;
+      if (text.style.fill !== fill) text.style.fill = fill;
+      if (text.style.wordWrapWidth !== wrap) text.style.wordWrapWidth = wrap;
+    }
+    const sprite = this.#sprites.get(id);
+    text.position.set((sprite?.x ?? view.x) + 11, (sprite?.y ?? view.y) + 10);
+  }
+
+  /** Keep a label glued to its (possibly animating) sprite. */
+  #placeLabel(sprite: Sprite): void {
+    const id = this.#spriteIds.get(sprite);
+    const text = id === undefined ? undefined : this.#texts.get(id);
+    if (!text) return;
+    text.position.set(sprite.x + 11, sprite.y + 10);
+    text.alpha = sprite.alpha;
   }
 
   /** Texture and color only (geometry may be animated separately). */

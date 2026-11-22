@@ -17,7 +17,8 @@ conflicts. The sync engine is hand-written: no Yjs, no Automerge.
 | **Document** | Shapes = tree node + LWW property map; selective undo/redo; restore-to-version | [`packages/doc`](packages/doc) |
 | **Sync** | Binary wire format, cursor + outbox protocol, presence, IndexedDB journal, Web-Lock replica leases | [`packages/sync`](packages/sync) |
 | **Server** | Ordered per-document delivery, group-commit Postgres log, snapshots, history, Redis fan-out across instances, signed tokens, rate limits | [`apps/server`](apps/server) |
-| **App** | React 19 + PixiJS 8 canvas, engine in a Web Worker, live cursors, time-travel slider | [`apps/web`](apps/web) |
+| **AI** | Local model (Ollama) → validated board plan, streaming JSON parser, deterministic layout | [`packages/ai`](packages/ai) |
+| **App** | React 19 + PixiJS 8 canvas, engine in a Web Worker, live cursors, time-travel slider, sticky notes | [`apps/web`](apps/web) |
 
 ## How it fits together
 
@@ -127,6 +128,33 @@ What the numbers say:
 
 Reproduce: `pnpm db:up`, then
 `pnpm --filter @canvas/server load -- --instances 2 --docs 40 --clients 5 --rate 10 --seconds 20 --routing affinity`.
+
+## Local AI
+
+`✦ AI` opens an assistant that runs on [Ollama](https://ollama.com) **on your machine** —
+prompts and boards never leave it. Default model `gemma3:4b` (3.3 GB; `ollama pull gemma3:4b`).
+
+- **Create board:** "Sprint retro: went well, didn't, actions" → a titled board of colored
+  columns and cards.
+- **Organize notes:** select sticky notes → they're sorted into columns. Your notes *move*;
+  nothing is duplicated.
+
+How it's built: the model returns content through a JSON schema Ollama enforces (never
+coordinates; layout is deterministic code). The JSON is parsed *while it streams*, so cards
+land one by one as the model writes. All output is validated and capped. The result is
+ordinary local edits in one undo group: it syncs to everyone, and one Ctrl+Z removes it.
+
+Measured with `pnpm --filter @canvas/ai eval` (gemma3:4b, CPU only, ~12 tokens/s):
+
+| Case | First card | Total | Cards | Notes placed |
+|---|---|---|---|---|
+| Create: app launch | 5.4 s | 37.7 s | 30 | — |
+| Create: retro | 3.6 s | 14.2 s | 9 | — |
+| Organize: 8 notes | 3.0 s | 12.5 s | 8 | **8 / 8** |
+
+The eval also caught a real failure the unit tests couldn't: the first "organize" design let
+the model copy note text, and gemma3:4b did, placing 0/8 notes and making 8 duplicates. The
+fix makes the model answer with note *numbers* only (see D046).
 
 ## Design decisions
 

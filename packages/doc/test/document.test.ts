@@ -72,6 +72,28 @@ describe("CanvasDocument", () => {
     expect(bob.shape("s")).toBeUndefined();
   });
 
+  it("labels: set, edit, sync, and validate", () => {
+    const alice = new CanvasDocument("alice");
+    const bob = new CanvasDocument("bob");
+    alice.createShapes([{ id: "note", props: { ...rect(), label: "Ship beta" } }]);
+    bob.merge(alice.state);
+    expect(bob.shape("note")?.label).toBe("Ship beta");
+    bob.updateShapes([{ id: "note", patch: { label: "Ship beta 🚀" } }]);
+    alice.merge(bob.state);
+    expect(alice.shape("note")?.label).toBe("Ship beta 🚀");
+    expect(() => alice.updateShapes([{ id: "note", patch: { label: "x".repeat(501) } }])).toThrow(RangeError);
+    expect(alice.shape("plain-missing")).toBeUndefined();
+  });
+
+  it("restoring a version without a label clears a label added since", () => {
+    const doc = new CanvasDocument("a");
+    doc.createShapes([{ id: "s", props: rect() }]);
+    const version = doc.shapes();
+    doc.updateShapes([{ id: "s", patch: { label: "added later" } }]);
+    doc.restoreTo(version);
+    expect(doc.shape("s")?.label).toBeUndefined();
+  });
+
   it("merge reports which shapes changed", () => {
     const alice = new CanvasDocument("alice");
     const bob = new CanvasDocument("bob");

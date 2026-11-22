@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@canvas/ai": "workspace:*",
     "@canvas/doc": "workspace:*",
     "@canvas/sync": "workspace:*",
     "motion": "^12.23.0",

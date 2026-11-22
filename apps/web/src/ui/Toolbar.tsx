@@ -9,12 +9,14 @@ const icons: Record<Tool, ReactNode> = {
   select: <path d="M5 3l14 8.5-6.2 1.3 3.7 6.4-2.6 1.5-3.7-6.4L5.5 18z" />,
   rect: <rect x="4" y="6" width="16" height="12" rx="2" />,
   ellipse: <ellipse cx="12" cy="12" rx="8" ry="6.5" />,
+  note: <path d="M5 4h14v11l-5 5H5zM14 20v-5h5" />,
 };
 
 const TOOLS: ReadonlyArray<{ id: Tool; label: string; key: string }> = [
   { id: "select", label: "Select", key: "V" },
   { id: "rect", label: "Rectangle", key: "R" },
   { id: "ellipse", label: "Ellipse", key: "O" },
+  { id: "note", label: "Sticky note (double-click any shape to edit text)", key: "N" },
 ];
 
 function ToolButton({ tool }: { tool: (typeof TOOLS)[number] }) {
@@ -110,6 +112,13 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
           onClick={() => editor?.redo()}
           path="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13"
         />
+        <ActionButton
+          title="Local AI: create or organize a board (runs on this device)"
+          disabled={!editor || historyOpen}
+          onClick={() => useUiStore.getState().setAiOpen(!useUiStore.getState().aiOpen)}
+        >
+          ✦ AI
+        </ActionButton>
         <ActionButton
           title={online ? "Browse and restore earlier versions" : "History needs a connection"}
           disabled={!editor || !online}

@@ -4,6 +4,7 @@
 export {
   CanvasDocument,
   EMPTY_DELTA,
+  MAX_LABEL_CHARS,
   SHAPE_KINDS,
   touchedIds,
   validatePatch,
@@ -17,3 +18,4 @@ export {
   type ShapeView,
 } from "./document.js";
 export type { NodeId } from "@canvas/crdt";
+

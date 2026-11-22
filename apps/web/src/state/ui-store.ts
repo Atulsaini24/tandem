@@ -2,7 +2,18 @@ import { create } from "zustand";
 import type { NodeId } from "@canvas/doc";
 import type { SyncStatus } from "@canvas/sync";
 
-export type Tool = "select" | "rect" | "ellipse";
+export type Tool = "select" | "rect" | "ellipse" | "note";
+
+export interface AiUiState {
+  readonly status: "idle" | "thinking" | "writing" | "done" | "error" | "cancelled";
+  readonly mode?: "generate" | "organize";
+  /** Cards placed so far in this run. */
+  readonly items: number;
+  readonly startedAt?: number;
+  readonly finishedAt?: number;
+  readonly message?: string;
+  readonly tokensPerSecond?: number;
+}
 
 export interface Stats {
   readonly fps: number;
@@ -69,6 +80,13 @@ interface UiState {
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly history: HistoryUiState | undefined;
+  /** The shape whose label is being edited. */
+  readonly editing: NodeId | undefined;
+  readonly ai: AiUiState;
+  readonly aiOpen: boolean;
+  setEditing(id: NodeId | undefined): void;
+  setAi(ai: Partial<AiUiState> & Pick<AiUiState, "status">): void;
+  setAiOpen(open: boolean): void;
   setUndo(state: { canUndo: boolean; canRedo: boolean }): void;
   setHistory(history: HistoryUiState | undefined): void;
   setTool(tool: Tool): void;
@@ -98,6 +116,12 @@ export const useUiStore = create<UiState>()((set) => ({
   canUndo: false,
   canRedo: false,
   history: undefined,
+  editing: undefined,
+  ai: { status: "idle", items: 0 },
+  aiOpen: false,
+  setEditing: (editing) => set({ editing }),
+  setAi: (ai) => set((state) => ({ ai: { ...state.ai, ...ai } })),
+  setAiOpen: (aiOpen) => set({ aiOpen }),
   setUndo: ({ canUndo, canRedo }) => set({ canUndo, canRedo }),
   setHistory: (history) => set({ history }),
   setTool: (tool) => set({ tool }),
