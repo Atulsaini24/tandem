@@ -17,13 +17,14 @@ const PRESENCE_INTERVAL_MS = 40;
 
 const DOC_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** Which server and document to sync with: ?doc=<id> picks the board. */
-function syncTarget(): { url: string; docId: string } {
-  const requested = new URLSearchParams(location.search).get("doc") ?? "default";
+/** Which server and document to sync with: ?doc=<id> picks the board, ?token=<t> signs in. */
+function syncTarget(): { url: string; docId: string; token: string | undefined } {
+  const params = new URLSearchParams(location.search);
+  const requested = params.get("doc") ?? "default";
   const docId = DOC_ID_PATTERN.test(requested) ? requested : "default";
   const configured = import.meta.env.VITE_SYNC_URL as string | undefined;
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  return { url: configured ?? `${scheme}://${location.hostname}:8787`, docId };
+  return { url: configured ?? `${scheme}://${location.hostname}:8787`, docId, token: params.get("token") ?? undefined };
 }
 
 /** The offline toggle is a per-viewer convenience: remembered across reloads. */
@@ -125,11 +126,11 @@ export class Editor {
    * real editor would start a fresh one, stranding the last session's unsent edits.
    */
   connect(): void {
-    const { url, docId } = syncTarget();
+    const { url, docId, token } = syncTarget();
     this.#docId = docId;
     const online = !readOffline(docId);
     useUiStore.getState().setSync({ docId, wantOnline: online });
-    this.engine.send({ type: "connect", url, docId, online });
+    this.engine.send(token ? { type: "connect", url, docId, online, token } : { type: "connect", url, docId, online });
     this.#schedulePresence();
   }
 

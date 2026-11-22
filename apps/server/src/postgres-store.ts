@@ -1,5 +1,5 @@
 import postgres from "postgres";
-import type { Store, StoredDelta, StoredSnapshot } from "./store.js";
+import type { AppendItem, Store, StoredDelta, StoredSnapshot } from "./store.js";
 
 /**
  * Postgres-backed delta log.
@@ -8,10 +8,9 @@ import type { Store, StoredDelta, StoredSnapshot } from "./store.js";
  * ON CONFLICT DO NOTHING means a resent push can never be stored twice, even if the
  * server crashed between writing it and sending the ACK.
  *
- * seq is assigned as max(seq) + 1 inside the INSERT. That's correct while one server
- * process owns a document (Room serializes appends). Multiple servers (M8) need a
- * per-document lock or sequence; the PRIMARY KEY (doc_id, seq) turns a race into a
- * loud error rather than a silent duplicate.
+ * seq is assigned as max(seq) + 1 under a per-document advisory lock, so any number of
+ * server instances can append to the same document. The PRIMARY KEY (doc_id, seq) is a
+ * backstop: a race would be a loud error, never a silent duplicate.
  */
 export class PostgresStore implements Store {
   readonly kind = "postgres";
@@ -61,14 +60,51 @@ export class PostgresStore implements Store {
   }
 
   async append(docId: string, clientId: string, clientSeq: number, delta: Uint8Array): Promise<number | "duplicate"> {
-    const rows = await this.#sql<Array<{ seq: string }>>`
-      insert into ops (doc_id, seq, client_id, client_seq, delta)
-      select ${docId}, coalesce(max(seq), 0) + 1, ${clientId}, ${clientSeq}, ${Buffer.from(delta)}
-      from ops where doc_id = ${docId}
-      on conflict (doc_id, client_id, client_seq) do nothing
-      returning seq`;
-    const row = rows[0];
-    return row ? Number(row.seq) : "duplicate";
+    const [result] = await this.appendBatch(docId, [{ clientId, clientSeq, delta }]);
+    return result ?? "duplicate";
+  }
+
+  /**
+   * Group commit: one transaction, one lock, one duplicate check, one multi-row INSERT,
+   * whatever the batch size. Under load, the deltas that queued up for a document while
+   * the previous transaction ran all go in the next one, so per-document throughput no
+   * longer pays ~4 database round trips per delta.
+   *
+   * Several server instances may append to the same document at once. A transaction-
+   * scoped advisory lock per document serializes them, so numbering can't race, and seq
+   * N+1 can only commit after N has. Room's gap fill relies on that.
+   */
+  async appendBatch(docId: string, items: readonly AppendItem[]): Promise<Array<number | "duplicate">> {
+    if (items.length === 0) return [];
+    return this.#sql.begin(async (tx) => {
+      await tx`select pg_advisory_xact_lock(hashtextextended(${docId}, 0))`;
+      const [headRow] = await tx<Array<{ head: string }>>`
+        select coalesce(max(seq), 0) as head from ops where doc_id = ${docId}`;
+      // Duplicates are found BEFORE numbering: a skipped row must not leave a gap in seq.
+      const existing = await tx<Array<{ client_id: string; client_seq: string }>>`
+        select client_id, client_seq from ops
+        where doc_id = ${docId}
+          and (client_id, client_seq) in (
+            select * from unnest(${tx.array(items.map((i) => i.clientId))}::text[],
+                                 ${tx.array(items.map((i) => i.clientSeq))}::bigint[]))`;
+      const seen = new Set(existing.map((row) => `${row.client_id}\u0000${row.client_seq}`));
+      let next = Number(headRow?.head ?? 0);
+      const rows: Array<{ doc_id: string; seq: number; client_id: string; client_seq: number; delta: Buffer }> = [];
+      const results: Array<number | "duplicate"> = [];
+      for (const item of items) {
+        const key = `${item.clientId}\u0000${item.clientSeq}`;
+        if (seen.has(key)) {
+          results.push("duplicate"); // already stored, or twice in this very batch
+          continue;
+        }
+        seen.add(key);
+        next += 1;
+        rows.push({ doc_id: docId, seq: next, client_id: item.clientId, client_seq: item.clientSeq, delta: Buffer.from(item.delta) });
+        results.push(next);
+      }
+      if (rows.length > 0) await tx`insert into ops ${tx(rows, "doc_id", "seq", "client_id", "client_seq", "delta")}`;
+      return results;
+    });
   }
 
   async readSince(docId: string, since: number, until?: number): Promise<StoredDelta[]> {

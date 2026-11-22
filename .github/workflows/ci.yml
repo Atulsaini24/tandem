@@ -22,8 +22,18 @@ jobs:
           --health-interval 2s
           --health-timeout 3s
           --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
     env:
       DATABASE_URL: postgres://canvas:canvas-dev@localhost:5433/canvas
+      REDIS_URL: redis://localhost:6380
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

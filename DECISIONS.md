@@ -312,6 +312,70 @@ itself (the server only accepts a client's own ops, D025). Together, the connect
 restore everything they know. The same applies to a database restored from an older
 backup. Tested; disabling the check makes the test fail.
 
+## D037 — Multiple instances: one ordered stream per document, per instance
+Instances share the Postgres log and relay through Redis pub/sub, one channel per document.
+The hard part is ordering. An instance learns seq N from the bus but appends N+1 itself. If
+N+1 reached a client first, its cursor would pass N and N would be discarded as "already
+seen", lost for good. So each instance's `Room` releases seqs strictly in order (delivered+1,
++2, ...), buffering early arrivals:
+- **ACKs go through the same stream.** An ACK moves the sender's cursor too, so acking N+1
+  before N is delivered loses N the same way. Mutation-tested: sending ACKs immediately makes
+  the gate fail.
+- **Gaps are filled from the store** after 100 ms. Seqs are assigned under a per-document
+  advisory lock (`pg_advisory_xact_lock`) and published after commit, so a committed N+1
+  implies a committed N.
+- **Lost messages:** Redis pub/sub is fire-and-forget, and a lost LAST delta creates no gap
+  to notice. Rooms with clients compare their position with the store's head every second.
+  Tested with a bus that drops 50% of messages; removing the check fails it.
+- **Tested with a hostile in-memory bus:** 3 instances, random delays (reordering), 25
+  random histories with disconnects. Every client must equal the store's full log. A
+  counter proves reordering really happened. Plus one test over real Redis + Postgres
+  (gapless seqs 1..201 with 4 writers on 2 instances; removing the lock gives duplicate-key
+  errors).
+- Considered: routing each document to one owner instance only (simpler ordering, but
+  needs a proxy layer and failover). Kept as a deployment recommendation (D040), not a
+  correctness requirement.
+
+## D038 — Group commit
+Measured, not guessed: with Postgres, 1,000 edits/s had a p50 latency of 1,436 ms. The same
+load against the in-memory store had 3 ms, and the load generator's event loop was healthy,
+so the database path was the bottleneck: each delta was its own transaction (~4 round
+trips), serialized per document. Now pushes queue per document, and one transaction appends
+everything queued so far (one lock, one duplicate check, one multi-row INSERT). The batch
+size grows with load on its own. Result: p50 **43 ms** at 1,000/s, **90 ms** at 2,000/s.
+Duplicates are detected before numbering, so a duplicate never takes a seq (a gap would stall
+ordered delivery forever). Tested, including duplicates inside one batch.
+
+## D039 — Rate limits are backpressure, plus client flow control
+The first version disconnected a client over its rate. The flood test found a livelock: the
+client resent its whole outbox on reconnect, the resends were duplicates that used up the
+budget, and nothing new ever got through. Now:
+- **Client:** at most 64 pushes in flight, and more are sent as ACKs return (like a TCP window).
+- **Server:** over-limit pushes wait in order for tokens. Only a client queueing far more
+  than an honest client can (2× burst) is disconnected (4429). The flooding test now
+  completes on one connection.
+
+## D040 — Load balancing: route by document
+Splitting one document's clients across instances is correct but costs 3× latency at
+2,000/s (every edit crosses Redis, and the instances contend on the document's lock). With
+routing by document (e.g. consistent hashing on doc id), 2 instances matched or beat 1 and
+the bus carried nothing. Recommendation: hash on doc id at the load balancer; Redis
+guarantees correctness when clients end up split anyway (failover, rebalancing).
+
+## D041 — Auth: signed tokens, verified by the sync server
+HMAC-SHA256 tokens (claims: doc, user, role, expiry), compared in constant time. The sync
+server verifies and never stores sessions. Issuing tokens is the app backend's job after
+sign-in (`pnpm --filter @canvas/server token` mints dev tokens). Roles: `editor` can push;
+`viewer` receives everything but every push is rejected. Without `AUTH_SECRET` the
+server runs open, which is the dev default.
+
+## D042 — Load generator in Node instead of k6
+The plan said k6. But k6 would need a second copy of the binary codec in its own JS
+runtime, so it would test a model of the client, not the client. The generator runs the
+real `SyncClient` against real server processes, measures end-to-end latency, and fails if
+any document diverged. It also reports its own event-loop delay, so an overloaded
+generator can't pass itself off as a slow server.
+
 ## D013 — Tree correctness is checked against a reference implementation
 The test oracle is a 10-line naive version: sort every op by timestamp, replay from empty,
 skip cycles. The real engine must equal it for every delivery order. Mutation checks:

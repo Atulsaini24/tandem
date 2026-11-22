@@ -29,6 +29,7 @@ export interface OfflineReplicaOptions {
   readonly onState?: (state: SyncState) => void;
   readonly onPresence?: (clientId: string, presence: Presence | null) => void;
   readonly createSocket?: (url: string) => SocketLike;
+  readonly token?: string;
   readonly minBackoffMs?: number;
   readonly maxBackoffMs?: number;
   /** Compact the local log into a snapshot after this many entries. */
@@ -109,6 +110,7 @@ export class OfflineReplica {
       },
       ...(options.onState ? { onState: options.onState } : {}),
       ...(options.createSocket ? { createSocket: options.createSocket } : {}),
+      ...(options.token ? { token: options.token } : {}),
       ...(options.minBackoffMs === undefined ? {} : { minBackoffMs: options.minBackoffMs }),
       ...(options.maxBackoffMs === undefined ? {} : { maxBackoffMs: options.maxBackoffMs }),
     });

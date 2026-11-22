@@ -21,10 +21,17 @@ the current milestone passes its gate.
 - **Named versions:** let people label a version ("before the redesign") and jump to it.
 - **Coalesce drag deltas in the outbox:** a drag pushes ~60 deltas/s. Consecutive LWW writes
   to the same keys could be merged before sending.
-- **Auth + per-doc permissions (M8):** anyone who knows a doc id can join it today.
-- **Rate limits and max deltas per message (M8).**
-- **Multi-instance seq assignment (M8):** `max(seq)+1` is safe with one server per doc; use
-  a per-doc lock/sequence or route each doc to one instance.
+- **Sign-in UI:** the server verifies tokens, and the web app passes `?token=`, but there's
+  no login screen or token-issuing backend yet. Viewers also see editing tools that the
+  server will reject; the UI should go read-only for them.
+- **Stale remote presence:** if an instance crashes, its clients' cursors stay visible on
+  other instances (no LEAVE is sent). Give presence a TTL / heartbeat.
+- **Room cleanup:** rooms (and their Redis subscriptions) are never removed after the last
+  client leaves.
+- **Load test on real hardware:** separate machines for servers, Postgres and generators, to
+  measure actual horizontal scaling (one laptop shares CPU between everything).
+- **uWebSockets.js:** still not needed; the database was the bottleneck, not the socket layer
+  (D026).
 - **Tombstone garbage collection (M7/M8):** drop tombstones once every replica is known to
   have seen them (causal stability). Needs version vectors from the sync layer.
 - **Move-log truncation (M8):** once an op is causally stable (every replica has seen

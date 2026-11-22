@@ -18,5 +18,17 @@ services:
       timeout: 3s
       retries: 30
 
+  # Pub/sub between sync server instances (only needed when running more than one).
+  #   REDIS_URL=redis://localhost:6380
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379" # 6380 on the host, so it never clashes with a locally installed Redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
 volumes:
   pgdata:

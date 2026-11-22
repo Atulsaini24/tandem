@@ -12,10 +12,29 @@ import {
   type ClientMessage,
   type ServerMessage,
 } from "@canvas/sync";
+import { verifyToken, type Role } from "./auth.js";
+import type { Bus, BusMessage } from "./bus.js";
+import { TokenBucket } from "./rate-limit.js";
+import { Room, type RoomClient } from "./room.js";
 import type { Store } from "./store.js";
+
+export interface RateLimits {
+  /** Pushes per second (sustained) and burst, per connection. */
+  readonly pushesPerSec: number;
+  readonly pushBurst: number;
+  readonly presencePerSec: number;
+  readonly historyPerSec: number;
+}
+
+export const DEFAULT_LIMITS: RateLimits = { pushesPerSec: 200, pushBurst: 400, presencePerSec: 60, historyPerSec: 20 };
 
 export interface SyncServerOptions {
   readonly store: Store;
+  /** Connects instances: without one, this server must be the only one for its documents. */
+  readonly bus?: Bus;
+  /** When set, every HELLO must carry a valid token (see auth.ts). */
+  readonly authSecret?: string;
+  readonly limits?: RateLimits;
   readonly port?: number;
   readonly host?: string;
   /** Reject ops stamped further than this in the future (protects every HLC). */
@@ -28,17 +47,26 @@ export interface SyncServerOptions {
   readonly snapshotMinGap?: number;
 }
 
+export interface SyncStats {
+  connections: number;
+  pushes: number;
+  duplicates: number;
+  rejected: number;
+  rateLimited: number;
+  unauthorized: number;
+  snapshotsWritten: number;
+  snapshotsSent: number;
+  historyServed: number;
+  fromBus: number;
+  /** Store transactions used for appends (pushes / batches = average group-commit size). */
+  batches: number;
+}
+
 export interface SyncServer {
   readonly port: number;
-  readonly stats: {
-    connections: number;
-    pushes: number;
-    duplicates: number;
-    rejected: number;
-    snapshotsWritten: number;
-    snapshotsSent: number;
-    historyServed: number;
-  };
+  readonly stats: SyncStats;
+  /** Ordering diagnostics summed over rooms: deltas that arrived out of order, gaps filled from the store. */
+  ordering(): { outOfOrder: number; gapFills: number };
   close(): Promise<void>;
 }
 
@@ -46,26 +74,26 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 /** Presence is a name, a color, a point and a capped selection: a few KB at most. */
 const MAX_PRESENCE_BYTES = 16 * 1024;
 
-/** Serializes all work for one document, so serverSeq order = send order to every client. */
-class Room {
-  readonly clients = new Set<Connection>();
-  #queue: Promise<void> = Promise.resolve();
-
-  constructor(readonly docId: string) {}
-
-  run(task: () => Promise<void>): Promise<void> {
-    const next = this.#queue.then(task);
-    this.#queue = next.catch((error: unknown) => console.error(`room ${this.docId}:`, error));
-    return next;
-  }
-}
-
-class Connection {
+class Connection implements RoomClient {
   room: Room | undefined;
   clientId = "";
-  /** Latest presence payload (opaque bytes), replayed to clients who join later. */
+  role: Role = "editor";
   presence: Uint8Array | undefined;
-  constructor(readonly socket: WebSocket) {}
+  readonly pushes: TokenBucket;
+  readonly presenceBucket: TokenBucket;
+  readonly historyBucket: TokenBucket;
+  /** Pushes waiting for rate-limit tokens, processed in arrival order. */
+  pushChain: Promise<void> = Promise.resolve();
+  queuedPushes = 0;
+
+  constructor(
+    readonly socket: WebSocket,
+    limits: RateLimits,
+  ) {
+    this.pushes = new TokenBucket(limits.pushesPerSec, limits.pushBurst);
+    this.presenceBucket = new TokenBucket(limits.presencePerSec, limits.presencePerSec);
+    this.historyBucket = new TokenBucket(limits.historyPerSec, limits.historyPerSec);
+  }
 
   send(message: ServerMessage): void {
     if (this.socket.readyState === this.socket.OPEN) this.socket.send(encodeServerMessage(message));
@@ -75,9 +103,16 @@ class Connection {
     if (this.socket.readyState === this.socket.OPEN) this.socket.send(bytes);
   }
 
+  /** Fatal: the client stops reconnecting (bad credentials, forged data, ...). */
   reject(message: string): void {
     this.send({ type: "error", fatal: true, message });
     this.socket.close(4400, message.slice(0, 120));
+  }
+
+  /** Not fatal: the client backs off, reconnects and resends its outbox. */
+  slowDown(): void {
+    this.send({ type: "error", fatal: false, message: "rate limit: slow down" });
+    this.socket.close(4429, "rate limited");
   }
 }
 
@@ -88,73 +123,137 @@ function toBytes(data: RawData): Uint8Array {
 }
 
 export async function startSyncServer(options: SyncServerOptions): Promise<SyncServer> {
-  const { store } = options;
+  const { store, bus, authSecret } = options;
+  const limits = options.limits ?? DEFAULT_LIMITS;
   const maxDriftMs = options.maxDriftMs ?? 60_000;
   const now = options.now ?? Date.now;
   const rooms = new Map<string, Room>();
   const snapshotEvery = options.snapshotEvery ?? 500;
   const snapshotMinGap = options.snapshotMinGap ?? 50;
-  const stats = {
+  const stats: SyncStats = {
     connections: 0,
     pushes: 0,
     duplicates: 0,
     rejected: 0,
+    rateLimited: 0,
+    unauthorized: 0,
     snapshotsWritten: 0,
     snapshotsSent: 0,
     historyServed: 0,
+    fromBus: 0,
+    batches: 0,
   };
 
   const http = createServer((req, res) => {
     if (req.url === "/health") {
+      const memory = process.memoryUsage();
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, store: store.kind, rooms: rooms.size, ...stats }));
+      res.end(
+        JSON.stringify({
+          ok: true,
+          store: store.kind,
+          instance: bus?.instanceId ?? "standalone",
+          rooms: rooms.size,
+          clients: [...rooms.values()].reduce((n, room) => n + room.clients.size, 0),
+          rssMb: Math.round(memory.rss / 1e6),
+          ...stats,
+        }),
+      );
       return;
     }
     res.writeHead(404).end();
   });
   const wss = new WebSocketServer({ server: http, maxPayload: options.maxPayloadBytes ?? 16 * 1024 * 1024 });
 
+  // --- rooms + bus ---------------------------------------------------------
+
+  function onBus(room: Room, message: BusMessage): void {
+    switch (message.kind) {
+      case "delta":
+        stats.fromBus += 1;
+        void room.run(() => room.offer(message.seq, message.delta));
+        return;
+      case "presence": {
+        room.remotePresence.set(message.clientId, message.payload);
+        const relay = encodeServerMessage({ type: "presence", clientId: message.clientId, payload: message.payload });
+        for (const client of room.clients) client.sendRaw(relay);
+        return;
+      }
+      case "leave": {
+        room.remotePresence.delete(message.clientId);
+        const relay = encodeServerMessage({ type: "leave", clientId: message.clientId });
+        for (const client of room.clients) client.sendRaw(relay);
+        return;
+      }
+      case "who":
+        for (const client of room.clients) {
+          if (client.presence) bus?.publish(room.docId, { kind: "presence", clientId: client.clientId, payload: client.presence });
+        }
+    }
+  }
+
   function roomFor(docId: string): Room {
     let room = rooms.get(docId);
     if (!room) {
-      room = new Room(docId);
+      room = new Room(
+        docId,
+        store,
+        async (created) => {
+          if (!bus) return;
+          await bus.subscribe(docId, (message) => onBus(created, message));
+          bus.publish(docId, { kind: "who" }); // learn who's connected elsewhere
+        },
+        // Only needed when other instances append too (a lone server sees every append).
+        { tailCheck: bus !== undefined },
+      );
       rooms.set(docId, room);
     }
     return room;
   }
+
+  // --- handlers --------------------------------------------------------------
 
   function hello(conn: Connection, message: Extract<ClientMessage, { type: "hello" }>): void {
     if (conn.room) return conn.reject("hello sent twice");
     if (message.version !== PROTOCOL_VERSION) return conn.reject(`unsupported protocol version ${message.version}`);
     if (!ID_PATTERN.test(message.docId)) return conn.reject("invalid document id");
     if (!ID_PATTERN.test(message.clientId)) return conn.reject("invalid client id");
+    if (authSecret) {
+      const claims = verifyToken(authSecret, message.token, message.docId, now());
+      if (typeof claims === "string") {
+        stats.unauthorized += 1;
+        return conn.reject(`unauthorized: ${claims}`);
+      }
+      conn.role = claims.role;
+    }
     const room = roomFor(message.docId);
     conn.room = room;
     conn.clientId = message.clientId;
-    // Inside the room queue: the backlog and joining the broadcast set happen with no
-    // append in between, so the client can't miss or double-receive a delta.
+    // Inside the room queue: backlog up to `delivered`, then join the ordered stream.
+    // Nothing can be delivered in between, so the client neither misses nor repeats a seq.
     void room.run(async () => {
+      let from = message.since;
       // Far behind (or brand new)? Send the latest snapshot as one big delta, then only
       // the tail after it. A snapshot is just the merge of everything up to its seq, so to
       // the client it's an ordinary (idempotent) delta with serverSeq = snapshot.seq.
-      let from = message.since;
-      const snapshot = await store.snapshot(room.docId);
+      const snapshot = await store.snapshot(room.docId, room.delivered);
       if (snapshot && snapshot.seq - message.since >= snapshotMinGap) {
         conn.send({ type: "delta", serverSeq: snapshot.seq, delta: snapshot.state });
         stats.snapshotsSent += 1;
         from = snapshot.seq;
       }
-      for (const entry of await store.readSince(room.docId, from)) {
-        conn.send({ type: "delta", serverSeq: entry.seq, delta: entry.delta });
-      }
-      room.clients.add(conn);
-      conn.send({ type: "welcome", head: await store.head(room.docId) });
-      // Who's already here: their latest cursors/selections.
-      for (const other of room.clients) {
-        if (other !== conn && other.presence) {
-          conn.send({ type: "presence", clientId: other.clientId, payload: other.presence });
+      if (from < room.delivered) {
+        for (const entry of await store.readSince(room.docId, from, room.delivered)) {
+          conn.send({ type: "delta", serverSeq: entry.seq, delta: entry.delta });
         }
       }
+      room.clients.add(conn);
+      conn.send({ type: "welcome", head: room.delivered });
+      // Who's already here, on this instance and on others.
+      for (const other of room.clients) {
+        if (other !== conn && other.presence) conn.send({ type: "presence", clientId: other.clientId, payload: other.presence });
+      }
+      for (const [clientId, payload] of room.remotePresence) conn.send({ type: "presence", clientId, payload });
     });
   }
 
@@ -166,9 +265,11 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
     const room = conn.room;
     if (!room) return conn.reject("presence before hello");
     if (payload.length > MAX_PRESENCE_BYTES) return conn.reject("presence too large");
+    if (!conn.presenceBucket.take()) return; // latest-wins data: dropping extras is fine
     conn.presence = payload;
     const relay = encodeServerMessage({ type: "presence", clientId: conn.clientId, payload });
     for (const other of room.clients) if (other !== conn) other.sendRaw(relay);
+    bus?.publish(room.docId, { kind: "presence", clientId: conn.clientId, payload });
   }
 
   function leave(conn: Connection): void {
@@ -178,6 +279,7 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
     if (!conn.presence) return;
     const relay = encodeServerMessage({ type: "leave", clientId: conn.clientId });
     for (const other of room.clients) other.sendRaw(relay);
+    bus?.publish(room.docId, { kind: "leave", clientId: conn.clientId });
   }
 
   /** Validate untrusted bytes before they reach the log. Returns an error message or undefined. */
@@ -201,29 +303,78 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
   function push(conn: Connection, message: Extract<ClientMessage, { type: "push" }>): void {
     const room = conn.room;
     if (!room) return conn.reject("push before hello");
+    if (conn.role === "viewer") {
+      stats.unauthorized += 1;
+      return conn.reject("read-only access: this token can't edit");
+    }
     const problem = validate(conn, message.delta);
     if (problem) {
       stats.rejected += 1;
       return conn.reject(problem);
     }
-    void room.run(async () => {
-      const result = await store.append(room.docId, conn.clientId, message.clientSeq, message.delta);
+    // Rate limiting is BACKPRESSURE: over-limit pushes wait (in order) for tokens rather
+    // than being dropped, because a dropped push stays in the client's outbox and comes
+    // back on reconnect. Rejecting caused a livelock: resends were duplicates that ate
+    // the budget before anything new got through. Only a client queueing far more than an
+    // honest one ever can (its in-flight window is 64) is disconnected.
+    if (conn.queuedPushes >= Math.max(limits.pushBurst * 2, 128)) {
+      stats.rateLimited += 1;
+      return conn.slowDown();
+    }
+    conn.queuedPushes += 1;
+    if (conn.pushes.available() < 1) stats.rateLimited += 1; // this one will have to wait
+    conn.pushChain = conn.pushChain.then(async () => {
+      await conn.pushes.acquire();
+      conn.queuedPushes -= 1;
+      enqueueAppend(conn, room, message);
+    });
+  }
+
+  /**
+   * Group commit. Pushes queue per room; one room task appends everything queued so far
+   * in a single store transaction. While that transaction runs, new pushes collect for
+   * the next one, so the batch size grows with load on its own.
+   */
+  const appendQueues = new Map<Room, Array<{ conn: Connection; clientSeq: number; delta: Uint8Array }>>();
+
+  function enqueueAppend(conn: Connection, room: Room, message: Extract<ClientMessage, { type: "push" }>): void {
+    let queue = appendQueues.get(room);
+    if (!queue) {
+      queue = [];
+      appendQueues.set(room, queue);
+      void room.run(() => drainAppends(room));
+    }
+    queue.push({ conn, clientSeq: message.clientSeq, delta: message.delta });
+  }
+
+  async function drainAppends(room: Room): Promise<void> {
+    const batch = appendQueues.get(room) ?? [];
+    appendQueues.delete(room); // pushes arriving from now on start the next batch
+    const results = await store.appendBatch(
+      room.docId,
+      batch.map((item) => ({ clientId: item.conn.clientId, clientSeq: item.clientSeq, delta: item.delta })),
+    );
+    stats.batches += 1;
+    let snapshotAt: number | undefined;
+    results.forEach((result, i) => {
+      const item = batch[i];
+      if (!item) return;
       if (result === "duplicate") {
-        // Everything up to head has already been sent on this connection (backlog/live),
-        // so acking at head can't make the client skip a delta.
+        // Everything up to `delivered` has gone out on this connection, so acking there
+        // can't make the client skip a delta.
         stats.duplicates += 1;
-        conn.send({ type: "ack", clientSeq: message.clientSeq, serverSeq: await store.head(room.docId) });
+        item.conn.send({ type: "ack", clientSeq: item.clientSeq, serverSeq: room.delivered });
         return;
       }
       stats.pushes += 1;
-      conn.send({ type: "ack", clientSeq: message.clientSeq, serverSeq: result });
-      const relay = encodeServerMessage({ type: "delta", serverSeq: result, delta: message.delta });
-      for (const other of room.clients) if (other !== conn) other.sendRaw(relay);
-      if (result % snapshotEvery === 0) {
-        await store.putSnapshot(room.docId, { seq: result, state: await stateAt(room.docId, result) });
-        stats.snapshotsWritten += 1;
-      }
+      bus?.publish(room.docId, { kind: "delta", seq: result, delta: item.delta });
+      room.offer(result, item.delta, { client: item.conn, clientSeq: item.clientSeq });
+      if (result % snapshotEvery === 0) snapshotAt = result;
     });
+    if (snapshotAt !== undefined) {
+      await store.putSnapshot(room.docId, { seq: snapshotAt, state: await stateAt(room.docId, snapshotAt) });
+      stats.snapshotsWritten += 1;
+    }
   }
 
   /**
@@ -241,8 +392,12 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
   function history(conn: Connection, message: Extract<ClientMessage, { type: "history" }>): void {
     const room = conn.room;
     if (!room) return conn.reject("history before hello");
+    if (!conn.historyBucket.take()) {
+      stats.rateLimited += 1;
+      return; // the client's request fails when it disconnects/retries; the UI asks again
+    }
     void room.run(async () => {
-      const head = await store.head(room.docId);
+      const head = room.delivered;
       const at = Math.min(message.at, head);
       conn.send({ type: "history", requestId: message.requestId, at, head, state: await stateAt(room.docId, at) });
       stats.historyServed += 1;
@@ -251,7 +406,7 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
 
   wss.on("connection", (socket) => {
     stats.connections += 1;
-    const conn = new Connection(socket);
+    const conn = new Connection(socket, limits);
     socket.on("message", (data, isBinary) => {
       if (!isBinary) return conn.reject("binary frames only");
       let message: ClientMessage;
@@ -282,8 +437,17 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
   return {
     port,
     stats,
+    ordering: () =>
+      [...rooms.values()].reduce(
+        (sum, room) => ({ outOfOrder: sum.outOfOrder + room.stats.outOfOrder, gapFills: sum.gapFills + room.stats.gapFills }),
+        { outOfOrder: 0, gapFills: 0 },
+      ),
     close: async () => {
       for (const client of wss.clients) client.terminate();
+      for (const room of rooms.values()) {
+        room.close();
+        await bus?.unsubscribe(room.docId);
+      }
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve) => http.close(() => resolve()));
     },

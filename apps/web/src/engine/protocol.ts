@@ -33,7 +33,7 @@ export type EditCommand =
 
 export type ControlCommand =
   /** Open the document (restoring it from IndexedDB) and optionally go online. */
-  | { readonly type: "connect"; readonly url: string; readonly docId: string; readonly online: boolean }
+  | { readonly type: "connect"; readonly url: string; readonly docId: string; readonly online: boolean; readonly token?: string }
   /** Go offline / back online (the demo toggle). */
   | { readonly type: "network"; readonly online: boolean }
   | { readonly type: "presence"; readonly presence: Presence }

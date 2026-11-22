@@ -89,6 +89,24 @@ for (const backend of backends) {
       expect((await store.readSince(doc, 0)).length).toBe(4);
     });
 
+    it("appends a batch gaplessly; duplicates (stored or within the batch) take no seq", async () => {
+      const store = await backend.open();
+      const doc = docId("batch");
+      expect(await store.append(doc, "a", 1, bytes(1))).toBe(1);
+      const results = await store.appendBatch(doc, [
+        { clientId: "a", clientSeq: 1, delta: bytes(1) }, // already stored
+        { clientId: "a", clientSeq: 2, delta: bytes(2) },
+        { clientId: "b", clientSeq: 1, delta: bytes(3) },
+        { clientId: "b", clientSeq: 1, delta: bytes(3) }, // repeated within the batch
+        { clientId: "a", clientSeq: 3, delta: bytes(4) },
+      ]);
+      expect(results).toEqual(["duplicate", 2, 3, "duplicate", 4]);
+      const log = await store.readSince(doc, 0);
+      expect(log.map((e) => e.seq)).toEqual([1, 2, 3, 4]); // no holes
+      expect(log.map((e) => e.delta[0])).toEqual([1, 2, 3, 4]);
+      expect(await store.appendBatch(doc, [])).toEqual([]);
+    });
+
     it("reads a bounded range (since < seq ≤ until)", async () => {
       const store = await backend.open();
       const doc = docId("range");

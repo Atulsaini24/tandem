@@ -6,7 +6,7 @@ import { DecodeError, Reader, Writer } from "./codec.js";
  * Deltas and presence travel as opaque, already-encoded bytes: the server validates a
  * pushed delta once, stores those exact bytes, and relays them without re-encoding.
  *
- *   client → server   HELLO     version, docId, clientId, since (last server seq seen)
+ *   client → server   HELLO     version, docId, clientId, since (last server seq seen), token
  *                     PUSH      clientSeq, delta
  *                     PRESENCE  payload                 (ephemeral, latest wins)
  *                     HISTORY?  requestId, at           ("what did the doc look like at seq N?")
@@ -18,7 +18,8 @@ import { DecodeError, Reader, Writer } from "./codec.js";
  *                     HISTORY   requestId, at, head, state (encoded DocDelta at seq `at`)
  *                     ERROR     fatal, message
  */
-export const PROTOCOL_VERSION = 1;
+/** v2: HELLO carries an access token (empty when the server runs without auth). */
+export const PROTOCOL_VERSION = 2;
 
 const HELLO = 1;
 const PUSH = 2;
@@ -33,7 +34,14 @@ const LEAVE = 21;
 const HISTORY = 22;
 
 export type ClientMessage =
-  | { readonly type: "hello"; readonly version: number; readonly docId: string; readonly clientId: string; readonly since: number }
+  | {
+      readonly type: "hello";
+      readonly version: number;
+      readonly docId: string;
+      readonly clientId: string;
+      readonly since: number;
+      readonly token: string;
+    }
   | { readonly type: "push"; readonly clientSeq: number; readonly delta: Uint8Array }
   | { readonly type: "presence"; readonly payload: Uint8Array }
   | { readonly type: "history"; readonly requestId: number; readonly at: number };
@@ -62,6 +70,7 @@ export function encodeClientMessage(message: ClientMessage): Uint8Array {
       w.str(message.docId);
       w.str(message.clientId);
       w.uint(message.since);
+      w.str(message.token);
       break;
     case "push":
       w.byte(PUSH);
@@ -85,7 +94,14 @@ export function decodeClientMessage(bytes: Uint8Array): ClientMessage {
   const r = new Reader(bytes);
   const type = r.byte();
   if (type === HELLO) {
-    const message: ClientMessage = { type: "hello", version: r.uint(), docId: r.str(), clientId: r.str(), since: r.uint() };
+    const message: ClientMessage = {
+      type: "hello",
+      version: r.uint(),
+      docId: r.str(),
+      clientId: r.str(),
+      since: r.uint(),
+      token: r.str(),
+    };
     r.end();
     return message;
   }

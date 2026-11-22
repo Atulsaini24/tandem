@@ -124,7 +124,7 @@ describe("delta codec", () => {
 describe("messages", () => {
   it("round-trip client and server messages", () => {
     const client: ClientMessage[] = [
-      { type: "hello", version: 1, docId: "doc-1", clientId: "abc", since: 123_456 },
+      { type: "hello", version: 2, docId: "doc-1", clientId: "abc", since: 123_456, token: "t.sig" },
       { type: "push", clientSeq: 9, delta: new Uint8Array([1, 2, 3]) },
     ];
     const server: ServerMessage[] = [

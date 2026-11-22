@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --conditions=source src/main.ts",
+    "token": "tsx --conditions=source src/token-cli.ts",
+    "load": "tsx --conditions=source load/load-test.ts",
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
@@ -13,6 +15,7 @@
   "dependencies": {
     "@canvas/doc": "workspace:*",
     "@canvas/sync": "workspace:*",
+    "ioredis": "^5.6.0",
     "postgres": "^3.4.5",
     "ws": "^8.18.0"
   },

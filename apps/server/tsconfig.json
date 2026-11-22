@@ -5,5 +5,5 @@
     "types": ["node"]
   },
   // Server code only: no DOM types, so browser APIs can't slip into the server.
-  "include": ["src", "vitest.config.ts"]
+  "include": ["src", "load", "vitest.config.ts"]
 }

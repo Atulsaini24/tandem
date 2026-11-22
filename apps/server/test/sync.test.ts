@@ -172,7 +172,7 @@ describe("sync server", () => {
     const raw = await rawSocket(server);
     const doc = new CanvasDocument("eve");
     const delta = encodeDelta(doc.createShapes([{ id: "s", props: rect() }]));
-    raw.send(encodeClientMessage({ type: "hello", version: PROTOCOL_VERSION, docId: "doc", clientId: "eve", since: 0 }));
+    raw.send(encodeClientMessage({ type: "hello", version: PROTOCOL_VERSION, docId: "doc", clientId: "eve", since: 0, token: "" }));
     raw.send(encodeClientMessage({ type: "push", clientSeq: 1, delta }));
     raw.send(encodeClientMessage({ type: "push", clientSeq: 1, delta }));
     await until(() => raw.received.filter((m) => m.type === "ack").length === 2, "two acks");
@@ -200,7 +200,7 @@ describe("sync server", () => {
     const server = await serve();
     const raw = await rawSocket(server);
     const mallory = new CanvasDocument("mallory");
-    raw.send(encodeClientMessage({ type: "hello", version: PROTOCOL_VERSION, docId: "doc", clientId: "eve", since: 0 }));
+    raw.send(encodeClientMessage({ type: "hello", version: PROTOCOL_VERSION, docId: "doc", clientId: "eve", since: 0, token: "" }));
     raw.send(encodeClientMessage({ type: "push", clientSeq: 1, delta: encodeDelta(mallory.createShapes([{ id: "x", props: rect() }])) }));
     await until(raw.closed, "forger disconnected");
     expect(raw.received.at(-1)).toMatchObject({ type: "error", message: "delta contains ops from another replica" });
@@ -210,7 +210,7 @@ describe("sync server", () => {
     const server = await serve();
     const raw = await rawSocket(server);
     const skewed = new CanvasDocument("eve", () => Date.now() + 60 * 60 * 1000); // 1 hour ahead
-    raw.send(encodeClientMessage({ type: "hello", version: PROTOCOL_VERSION, docId: "doc", clientId: "eve", since: 0 }));
+    raw.send(encodeClientMessage({ type: "hello", version: PROTOCOL_VERSION, docId: "doc", clientId: "eve", since: 0, token: "" }));
     raw.send(encodeClientMessage({ type: "push", clientSeq: 1, delta: encodeDelta(skewed.createShapes([{ id: "x", props: rect() }])) }));
     await until(raw.closed, "skewed client disconnected");
     expect(raw.received.at(-1)).toMatchObject({ type: "error", fatal: true });

@@ -72,10 +72,19 @@ export interface SyncClientOptions {
    */
   readonly onServerReset?: (head: number) => void;
   readonly initial?: SyncResume;
+  /** Access token, when the server requires one (see apps/server/src/auth.ts). */
+  readonly token?: string;
   readonly createSocket?: (url: string) => SocketLike;
   readonly minBackoffMs?: number;
   readonly maxBackoffMs?: number;
 }
+
+/**
+ * Flow control: at most this many pushes in flight (sent, not yet ACKed) per connection.
+ * More are sent as ACKs come back. Keeps a reconnecting client with a big offline backlog
+ * from dumping it all at once into the server's rate limiter.
+ */
+const PUSH_WINDOW = 64;
 
 function defaultSocket(url: string): SocketLike {
   const WebSocketCtor = (globalThis as unknown as { WebSocket: new (url: string) => SocketLike }).WebSocket;
@@ -128,6 +137,8 @@ export class SyncClient {
   #error: string | undefined;
   #cursor: number;
   #outbox: OutboxItem[];
+  /** How many outbox items (from the front) have been sent on the current connection. */
+  #sent = 0;
   #nextClientSeq: number;
   #presence: Uint8Array | undefined;
   readonly #history = new Map<number, { resolve: (v: HistoryVersion) => void; reject: (e: Error) => void }>();
@@ -186,7 +197,7 @@ export class SyncClient {
     if (delta.tree.length === 0 && delta.props.length === 0) return undefined;
     const item: OutboxItem = { clientSeq: this.#nextClientSeq++, bytes: encodeDelta(delta) };
     this.#outbox.push(item);
-    if (this.#socketOpen) this.#sendPush(item);
+    this.#pump();
     this.#emit();
     return item;
   }
@@ -224,9 +235,11 @@ export class SyncClient {
           docId: this.#options.docId,
           clientId: this.#options.clientId,
           since: this.#cursor,
+          token: this.#options.token ?? "",
         }),
       );
-      for (const item of this.#outbox) this.#sendPush(item);
+      this.#sent = 0;
+      this.#pump();
       if (this.#presence) this.#send(encodeClientMessage({ type: "presence", payload: this.#presence }));
     };
     socket.onmessage = (event) => {
@@ -280,11 +293,16 @@ export class SyncClient {
         this.#emit();
         return;
       case "ack":
-        // Pushes are processed in order, so an ACK covers every earlier clientSeq too.
-        this.#outbox = this.#outbox.filter((item) => item.clientSeq > message.clientSeq);
-        this.#cursor = Math.max(this.#cursor, message.serverSeq);
-        this.#options.onAck?.(message.clientSeq, this.#cursor);
-        this.#emit();
+        {
+          // Pushes are processed in order, so an ACK covers every earlier clientSeq too.
+          const before = this.#outbox.length;
+          this.#outbox = this.#outbox.filter((item) => item.clientSeq > message.clientSeq);
+          this.#sent = Math.max(0, this.#sent - (before - this.#outbox.length));
+          this.#cursor = Math.max(this.#cursor, message.serverSeq);
+          this.#options.onAck?.(message.clientSeq, this.#cursor);
+          this.#pump(); // window has room again
+          this.#emit();
+        }
         return;
       case "presence":
         this.#options.onPresence?.(message.clientId, message.payload);
@@ -318,6 +336,17 @@ export class SyncClient {
     this.#timer = setTimeout(() => {
       if (this.#enabled) this.#connect();
     }, delay);
+  }
+
+  /** Send outbox items until the in-flight window is full. */
+  #pump(): void {
+    if (!this.#socketOpen) return;
+    while (this.#sent < this.#outbox.length && this.#sent < PUSH_WINDOW) {
+      const item = this.#outbox[this.#sent];
+      if (!item) break;
+      this.#sendPush(item);
+      this.#sent += 1;
+    }
   }
 
   #sendPush(item: OutboxItem): void {

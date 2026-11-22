@@ -79,7 +79,7 @@ async function edit(replica: OfflineReplica, command: EditCommand): Promise<DocD
   }
 }
 
-async function open(url: string, docId: string, online: boolean): Promise<OfflineReplica> {
+async function open(url: string, docId: string, online: boolean, token: string | undefined): Promise<OfflineReplica> {
   let storage: LocalStore | undefined;
   try {
     storage = await LocalStore.open();
@@ -91,6 +91,7 @@ async function open(url: string, docId: string, online: boolean): Promise<Offlin
     url,
     docId,
     ...(storage ? { storage } : {}),
+    ...(token ? { token } : {}),
     onRemote: (delta) => scope.postMessage(patchFor(replica.doc, lastSeq, delta, performance.now(), true)),
     onState: (state) => scope.postMessage({ type: "sync", ...state }),
     onPresence: (clientId, presence) => scope.postMessage({ type: "presence", clientId, presence }),
@@ -114,7 +115,7 @@ scope.addEventListener("message", (event) => {
   const command = event.data;
   switch (command.type) {
     case "connect":
-      ready = open(command.url, command.docId, command.online).catch((error: unknown) => {
+      ready = open(command.url, command.docId, command.online, command.token).catch((error: unknown) => {
         console.error("failed to open document", error);
         return undefined;
       });

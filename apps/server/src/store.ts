@@ -20,14 +20,24 @@ export interface StoredSnapshot {
   readonly state: Uint8Array;
 }
 
+export interface AppendItem {
+  readonly clientId: string;
+  readonly clientSeq: number;
+  readonly delta: Uint8Array;
+}
+
 export interface Store {
   readonly kind: string;
   /**
    * Append a client's delta. Returns its serverSeq, or "duplicate" if this
    * (clientId, clientSeq) was already stored (a resend after a lost ACK).
-   * Callers must serialize appends per document (see Room).
    */
   append(docId: string, clientId: string, clientSeq: number, delta: Uint8Array): Promise<number | "duplicate">;
+  /**
+   * Append several deltas atomically, in order (group commit). Seqs stay gapless:
+   * duplicates are detected BEFORE numbering, so they never consume a seq.
+   */
+  appendBatch(docId: string, items: readonly AppendItem[]): Promise<Array<number | "duplicate">>;
   /** Deltas with since < seq ≤ until (until defaults to the head), in order. */
   readSince(docId: string, since: number, until?: number): Promise<StoredDelta[]>;
   head(docId: string): Promise<number>;
@@ -56,6 +66,12 @@ export class MemoryStore implements Store {
     const seq = doc.entries.length + 1;
     doc.entries.push({ seq, delta });
     return seq;
+  }
+
+  async appendBatch(docId: string, items: readonly AppendItem[]): Promise<Array<number | "duplicate">> {
+    const results: Array<number | "duplicate"> = [];
+    for (const item of items) results.push(await this.append(docId, item.clientId, item.clientSeq, item.delta));
+    return results;
   }
 
   async readSince(docId: string, since: number, until?: number): Promise<StoredDelta[]> {

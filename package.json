@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "pnpm --parallel --filter @canvas/web --filter @canvas/server dev",
-    "db:up": "docker compose up -d --wait postgres",
+    "db:up": "docker compose up -d --wait postgres redis",
     "db:down": "docker compose down",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
