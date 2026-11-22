@@ -50,8 +50,16 @@ function referenceTree(ops: readonly MoveOp[]): Array<readonly [NodeId, TreeNode
   return [...nodes].sort(([a], [b]) => (a < b ? -1 : 1));
 }
 
-/** Independent acyclicity check: walking up from any node must terminate. */
+/**
+ * Independent acyclicity check: walking up from any node must terminate.
+ * Also checks the children index agrees with every node's parent pointer.
+ */
 function expectAcyclic(t: MoveTree): void {
+  const parents = new Set(t.nodes().map(([, node]) => node.parent));
+  for (const parent of parents) {
+    const expected = t.nodes().filter(([, node]) => node.parent === parent).map(([id]) => id);
+    expect([...t.children(parent)].sort()).toEqual(expected);
+  }
   for (const [id] of t.nodes()) {
     const visited = new Set<NodeId>();
     for (let current: NodeId | undefined = id; current !== undefined; current = t.get(current)?.parent) {

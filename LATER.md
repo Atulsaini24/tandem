@@ -10,8 +10,16 @@ the current milestone passes its gate.
   have seen them (causal stability). Needs version vectors from the sync layer.
 - **Move-log truncation (M8):** once an op is causally stable (every replica has seen
   everything before it), its undo info can be dropped and the log compacted to a snapshot.
-- **Children index (M4):** `children()` scans every node (O(n)). Keep a parent → children
-  index updated in `#apply`/`#undo` before rendering 5,000 shapes.
+- **Fractional keys grow on repeated appends:** adding shapes one at a time at the end adds
+  about one character every ~6 inserts. Switch to keys with a variable-length integer part
+  (like the "a0" scheme) so appends stay O(log n) long. Bulk creates already bisect.
+- **Viewport culling + R-tree:** not needed at 5,000 batched sprites; revisit at 50k+, or
+  when shapes get real vector paths.
+- **Code-split the web bundle:** main chunk is 639 kB (201 kB gzip), mostly Pixi + React +
+  Motion. Lazy-load the WebGPU renderer and non-critical UI.
+- **Dark mode for the canvas:** UI tokens exist; Pixi background and grid colors are
+  constants for now.
+- **ESLint React rules:** add eslint-plugin-react-hooks once the UI grows.
 - **Text performance (when docs get long):** every edit re-walks the whole tree (O(n)),
   and each character is its own node. Fine for sticky notes; for long docs, cache an
   order-statistic tree for index → node lookups and store typed runs as one node.

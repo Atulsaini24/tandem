@@ -75,6 +75,8 @@ export class MoveTree {
   /** Applied ops, ascending by timestamp. */
   readonly #log: LogEntry[] = [];
   readonly #nodes = new Map<NodeId, TreeNode>();
+  /** parent → children index, so `children()` doesn't scan every node. */
+  readonly #children = new Map<NodeId, Set<NodeId>>();
   readonly #seen = new Set<string>();
 
   constructor(clock: HybridLogicalClock, ops?: TreeDelta) {
@@ -99,8 +101,9 @@ export class MoveTree {
   /** Children in sibling order: by position, ties broken by node id. */
   children(parent: NodeId): NodeId[] {
     const result: Array<[NodeId, string]> = [];
-    for (const [id, node] of this.#nodes) {
-      if (node.parent === parent) result.push([id, node.position]);
+    for (const id of this.#children.get(parent) ?? []) {
+      const node = this.#nodes.get(id);
+      if (node) result.push([id, node.position]);
     }
     return result
       .sort(([idA, posA], [idB, posB]) =>
@@ -175,13 +178,26 @@ export class MoveTree {
     const previous = this.#nodes.get(op.child);
     const createsCycle = this.isAncestor(op.child, op.parent);
     if (!isReserved(op.child) && !createsCycle) {
-      this.#nodes.set(op.child, { parent: op.parent, position: op.position });
+      this.#place(op.child, { parent: op.parent, position: op.position });
     }
     return { op, previous };
   }
 
   #undo(entry: LogEntry): void {
-    if (entry.previous === undefined) this.#nodes.delete(entry.op.child);
-    else this.#nodes.set(entry.op.child, entry.previous);
+    this.#place(entry.op.child, entry.previous);
+  }
+
+  /** The only place nodes change, so the children index can never drift. */
+  #place(child: NodeId, node: TreeNode | undefined): void {
+    const before = this.#nodes.get(child);
+    if (before) this.#children.get(before.parent)?.delete(child);
+    if (node === undefined) {
+      this.#nodes.delete(child);
+      return;
+    }
+    this.#nodes.set(child, node);
+    const siblings = this.#children.get(node.parent) ?? new Set<NodeId>();
+    siblings.add(child);
+    this.#children.set(node.parent, siblings);
   }
 }

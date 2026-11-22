@@ -33,6 +33,25 @@ export function positionBetween(before: string | null, after: string | null): st
   return midpoint(before ?? "", after);
 }
 
+/**
+ * `count` evenly spread positions between `before` and `after`, in order.
+ *
+ * Inserting n items one after another makes keys grow by about one digit every few
+ * inserts. Bisecting instead keeps them about log2(n)/6 digits long: 5,000 shapes get
+ * keys of a few characters, not hundreds.
+ */
+export function positionsBetween(before: string | null, after: string | null, count: number): string[] {
+  if (!Number.isSafeInteger(count) || count < 0) throw new RangeError(`invalid count ${count}`);
+  if (count === 0) return [];
+  const mid = positionBetween(before, after);
+  const leftCount = Math.floor((count - 1) / 2);
+  return [
+    ...positionsBetween(before, mid, leftCount),
+    mid,
+    ...positionsBetween(mid, after, count - 1 - leftCount),
+  ];
+}
+
 /** Digit-wise midpoint of two fractions; `b === null` means 1.0. */
 function midpoint(a: string, b: string | null): string {
   if (b !== null) {

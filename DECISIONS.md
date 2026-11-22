@@ -116,6 +116,57 @@ Mutation checks: the naive "always attach right" rule fails 6 tests, including b
 interleaving and the string model; storing siblings in arrival order fails 4, including
 the fuzz.
 
+## D017 — The engine runs in a Web Worker; the UI thread keeps an optimistic mirror
+CRDT work (HLC, op logs, undo/redo on late ops, merges) never runs on the UI thread, so a
+burst of remote ops in M5 can't drop frames. The UI thread holds `Scene`: plain shape
+objects that local edits update *immediately*. Each command carries a sequence number;
+the worker echoes it on its patch, and a patch older than the latest local edit of a shape
+is ignored, so dragging never snaps back to a stale position. Drag updates are coalesced
+to one engine command per frame.
+
+## D018 — Shapes are tinted sprites of shared textures
+Each shape is a `Sprite` of `Texture.WHITE` (rect) or one generated circle texture
+(ellipse), colored with `tint` and sized by scale. Same texture means Pixi batches thousands
+of shapes into a few draw calls, and moving a shape is a transform change with no geometry
+rebuild. Tradeoff: ellipse edges come from a 256px texture, so they soften at extreme zoom.
+Real vector paths, when needed, become a separate render path.
+
+## D019 — Own hit-testing; Pixi's event system is off
+`stage.eventMode = "none"`. Hit-testing is a reverse z-order loop in world coordinates
+(`hit-test.ts`): exact ellipse hits instead of bounding boxes, unit-testable without a
+browser, and no per-event walk of 5,000 display objects. When counts outgrow a linear
+scan, an R-tree drops in behind the same functions.
+
+## D020 — Document model = composition of CRDTs (`packages/doc`)
+A shape is a MoveTree node (structure + z-order) plus an LWWMap (properties), sharing
+one HLC. Remote property data is untrusted: anything incomplete or malformed reads as
+"not renderable" instead of crashing. Bulk creates use `positionsBetween` (bisection), so
+5,000 shapes get z-keys of at most 6 characters instead of hundreds.
+
+## D021 — Workspace packages resolve to TypeScript source in dev
+Each package's `exports` lists a `"source"` condition first. Vite, Vitest and `tsc`
+(`customConditions`) resolve it to `src/*.ts`, so editing the engine hot-reloads the app
+and tests and typechecks need no build step. Node and published builds use
+`dist/` via the default condition.
+
+## D022 — Performance is measured, not eyeballed
+`editor.benchmark()` drags 500 shapes along a circle through the real path (Scene → worker
+→ patch → renderer) while panning and oscillating zoom for 5s.
+
+**The gate is main-thread work per frame, not fps.** FPS is capped by the display and by
+how the browser schedules the page. The first version of the gate ("avg ≥ 55 fps") failed
+in the embedded preview pane, which delivers ~30 frames/s even to an EMPTY page, so it
+was blaming the app for the monitor. Now the benchmark brackets each frame with ticker
+hooks (first callback → after Pixi's render) and the gate is:
+**p95 main-thread work ≤ 8 ms**, half of the 16.7 ms a 60fps frame allows, leaving the
+other half for GPU and compositor. FPS is still reported, labelled "display".
+
+Measured (M4, 5,000 shapes, 500 moved per frame, pan + zoom, preview pane):
+- frame work: **2.9 ms median, 3.9 ms p95** → PASS, ~4× headroom vs 60fps
+- worker: **0.6 ms** per 500-shape update (off the UI thread)
+- fps equal to the empty-page baseline (~31 in that pane): the app costs no frames
+- 5,000 shapes created and drawn end to end in 235 ms
+
 ## D013 — Tree correctness is checked against a reference implementation
 The test oracle is a 10-line naive version: sort every op by timestamp, replay from empty,
 skip cycles. The real engine must equal it for every delivery order. Mutation checks:

@@ -1,0 +1,33 @@
+import { useEffect, useRef, useState } from "react";
+import { createEditor, type Editor } from "./canvas/editor";
+import { Hud, KeyHints } from "./ui/Hud";
+import { Toolbar } from "./ui/Toolbar";
+
+export function App() {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [editor, setEditor] = useState<Editor | null>(null);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const handle = createEditor(host);
+    let alive = true;
+    void handle.ready.then((instance) => {
+      if (alive) setEditor(instance);
+    });
+    return () => {
+      alive = false;
+      setEditor(null);
+      handle.destroy();
+    };
+  }, []);
+
+  return (
+    <div className="relative h-full w-full select-none">
+      <div ref={hostRef} className="absolute inset-0" />
+      <Toolbar editor={editor} />
+      <Hud />
+      <KeyHints />
+    </div>
+  );
+}

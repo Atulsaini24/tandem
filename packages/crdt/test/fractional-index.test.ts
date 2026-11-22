@@ -1,6 +1,30 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
-import { isValidPosition, positionBetween } from "../src/index.js";
+import { isValidPosition, positionBetween, positionsBetween } from "../src/index.js";
+
+describe("positionsBetween", () => {
+  it("generates n ordered, valid, unique positions inside the bounds", () => {
+    fc.assert(
+      fc.property(fc.nat({ max: 300 }), fc.boolean(), (count, bounded) => {
+        const low = bounded ? positionBetween(null, null) : null;
+        const high = bounded && low !== null ? positionBetween(low, null) : null;
+        const keys = positionsBetween(low, high, count);
+        expect(keys).toHaveLength(count);
+        keys.forEach((key, i) => {
+          expect(isValidPosition(key)).toBe(true);
+          if (i > 0) expect((keys[i - 1] ?? "") < key).toBe(true);
+          if (low !== null) expect(key > low).toBe(true);
+          if (high !== null) expect(key < high).toBe(true);
+        });
+      }),
+    );
+  });
+
+  it("keeps keys short for 5,000 items", () => {
+    const keys = positionsBetween(null, null, 5_000);
+    expect(Math.max(...keys.map((key) => key.length))).toBeLessThanOrEqual(6);
+  });
+});
 
 describe("positionBetween", () => {
   it("generates a first position", () => {
