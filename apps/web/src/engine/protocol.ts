@@ -8,23 +8,37 @@ import type { Presence, SyncStatus } from "@canvas/sync";
  * resulting patch, so the UI can tell whether a patch is older than an edit it has
  * already shown optimistically (see Scene.applyPatch). Patches caused by REMOTE edits
  * carry the seq of the last local command the worker processed.
+ *
+ * `group`: edits with the same group (e.g. every step of one drag) undo as one step.
  */
 export type EditCommand =
-  | { readonly type: "create"; readonly seq: number; readonly shapes: ReadonlyArray<{ id: NodeId; props: ShapeProps }> }
+  | {
+      readonly type: "create";
+      readonly seq: number;
+      readonly shapes: ReadonlyArray<{ id: NodeId; props: ShapeProps }>;
+      readonly group?: number;
+    }
   | {
       readonly type: "update";
       readonly seq: number;
       readonly updates: ReadonlyArray<{ id: NodeId; patch: Partial<ShapeProps> }>;
+      readonly group?: number;
     }
-  | { readonly type: "delete"; readonly seq: number; readonly ids: readonly NodeId[] }
-  | { readonly type: "front"; readonly seq: number; readonly ids: readonly NodeId[] };
+  | { readonly type: "delete"; readonly seq: number; readonly ids: readonly NodeId[]; readonly group?: number }
+  | { readonly type: "front"; readonly seq: number; readonly ids: readonly NodeId[]; readonly group?: number }
+  | { readonly type: "undo"; readonly seq: number }
+  | { readonly type: "redo"; readonly seq: number }
+  /** Make the live document match the version at server seq `at`. */
+  | { readonly type: "restore"; readonly seq: number; readonly at: number };
 
 export type ControlCommand =
   /** Open the document (restoring it from IndexedDB) and optionally go online. */
   | { readonly type: "connect"; readonly url: string; readonly docId: string; readonly online: boolean }
   /** Go offline / back online (the demo toggle). */
   | { readonly type: "network"; readonly online: boolean }
-  | { readonly type: "presence"; readonly presence: Presence };
+  | { readonly type: "presence"; readonly presence: Presence }
+  /** Fetch the document as it was at server seq `at` (Infinity-ish = the head). */
+  | { readonly type: "history"; readonly requestId: number; readonly at: number };
 
 export type EngineCommand = EditCommand | ControlCommand;
 
@@ -70,4 +84,17 @@ export interface PresenceEvent {
   readonly presence: Presence | null;
 }
 
-export type EngineEvent = PatchEvent | ErrorEvent | SyncEvent | RestoredEvent | PresenceEvent;
+export interface UndoStateEvent {
+  readonly type: "undoState";
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  /** Set after an undo/redo: changes left alone because someone else edited them since. */
+  readonly skipped?: number;
+  readonly action?: "undo" | "redo" | "restore";
+}
+
+export type HistoryEvent =
+  | { readonly type: "history"; readonly requestId: number; readonly at: number; readonly head: number; readonly shapes: readonly ShapeView[] }
+  | { readonly type: "historyError"; readonly requestId: number; readonly message: string };
+
+export type EngineEvent = PatchEvent | ErrorEvent | SyncEvent | RestoredEvent | PresenceEvent | UndoStateEvent | HistoryEvent;

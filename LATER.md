@@ -12,8 +12,13 @@ the current milestone passes its gate.
   Fine at 5k shapes; at 100k, snapshot incrementally or on idle.
 - **Persistent storage permission:** call `navigator.storage.persist()` so the browser
   doesn't evict IndexedDB under storage pressure.
-- **Log compaction / snapshots (M7):** a new client replays the whole delta log. Periodically
-  snapshot the merged state, and serve snapshot + tail.
+- **History request cost:** each slider position rebuilds the state on the server (snapshot +
+  up to 500 deltas). Cache recent states per room, and/or snapshot more densely.
+- **Snapshot work blocks the room queue:** building a snapshot runs inside the document's
+  queue. Move it to an idle task off the critical path.
+- **History while offline:** time travel needs the server. Locally journaled history could
+  give a recent-history view offline.
+- **Named versions:** let people label a version ("before the redesign") and jump to it.
 - **Coalesce drag deltas in the outbox:** a drag pushes ~60 deltas/s. Consecutive LWW writes
   to the same keys could be merged before sending.
 - **Auth + per-doc permissions (M8):** anyone who knows a doc id can join it today.

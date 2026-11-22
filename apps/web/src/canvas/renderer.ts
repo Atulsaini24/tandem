@@ -5,6 +5,18 @@ import type { Peer, Peers } from "./peers";
 import type { Scene } from "./scene";
 import { clampZoom, panBy, screenToWorld, stepZoom, worldToScreen, type Point, type Viewport } from "./viewport";
 
+/** A sprite gliding between two states (time-travel transitions). */
+interface Tween {
+  readonly from: { x: number; y: number; w: number; h: number; alpha: number };
+  readonly to: { x: number; y: number; w: number; h: number; alpha: number };
+  elapsed: number;
+  /** Destroy the sprite when the tween ends (it faded out of existence). */
+  readonly dispose: boolean;
+}
+
+const TWEEN_MS = 320;
+const easeOutCubic = (t: number): number => 1 - (1 - t) ** 3;
+
 interface CursorView {
   readonly root: Container;
   readonly name: string;
@@ -58,6 +70,7 @@ export class Renderer {
   readonly #layer = new Container();
   readonly #overlay = new Graphics();
   readonly #sprites = new Map<NodeId, Sprite>();
+  readonly #tweens = new Map<Sprite, Tween>();
   #grid: TilingSprite | undefined;
   #circle: Texture | undefined;
   #dot: Texture | undefined;
@@ -155,6 +168,7 @@ export class Renderer {
     this.#updateGrid(v);
     this.#syncScene();
 
+    if (this.#tweens.size > 0) this.#stepTweens(dtMs);
     this.#peers.step(dtMs);
     this.#drawCursors(v);
     if (this.#peers.version !== this.#peersVersion) {
@@ -187,15 +201,21 @@ export class Renderer {
   #syncScene(): void {
     const scene = this.#scene;
     if (scene.dirty.size === 0 && !scene.orderDirty) return;
+    const animate = scene.animate;
+    scene.animate = false;
 
     for (const id of scene.dirty) {
       const view = scene.get(id);
       let sprite = this.#sprites.get(id);
       if (!view) {
-        if (sprite) {
+        if (!sprite) continue;
+        this.#sprites.delete(id);
+        if (animate) {
+          this.#tween(sprite, { x: sprite.x, y: sprite.y, w: sprite.width, h: sprite.height, alpha: 0 }, true);
+        } else {
+          this.#tweens.delete(sprite);
           this.#layer.removeChild(sprite);
           sprite.destroy();
-          this.#sprites.delete(id);
         }
         continue;
       }
@@ -203,8 +223,19 @@ export class Renderer {
         sprite = new Sprite();
         this.#sprites.set(id, sprite);
         this.#layer.addChild(sprite);
+        this.#applyView(sprite, view);
+        if (animate) {
+          sprite.alpha = 0;
+          this.#tween(sprite, { x: view.x, y: view.y, w: view.w, h: view.h, alpha: 1 }, false);
+        }
+        continue;
       }
-      this.#applyView(sprite, view);
+      if (animate) {
+        this.#applyLook(sprite, view);
+        this.#tween(sprite, { x: view.x, y: view.y, w: view.w, h: view.h, alpha: 1 }, false);
+      } else {
+        this.#applyView(sprite, view);
+      }
     }
     scene.dirty.clear();
     this.#overlayDirty = true;
@@ -215,16 +246,51 @@ export class Renderer {
         const sprite = this.#sprites.get(id);
         if (sprite) this.#layer.addChild(sprite);
       }
+      // Shapes fading out of existence stay on screen (on top) until their tween ends.
+      for (const [sprite, tween] of this.#tweens) if (tween.dispose) this.#layer.addChild(sprite);
       scene.orderDirty = false;
     }
   }
 
+  #tween(sprite: Sprite, to: Tween["to"], dispose: boolean): void {
+    this.#tweens.set(sprite, {
+      from: { x: sprite.x, y: sprite.y, w: sprite.width, h: sprite.height, alpha: sprite.alpha },
+      to,
+      elapsed: 0,
+      dispose,
+    });
+  }
+
+  #stepTweens(dtMs: number): void {
+    for (const [sprite, tween] of this.#tweens) {
+      tween.elapsed += dtMs;
+      const t = easeOutCubic(Math.min(1, tween.elapsed / TWEEN_MS));
+      const { from, to } = tween;
+      sprite.position.set(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
+      sprite.setSize(from.w + (to.w - from.w) * t, from.h + (to.h - from.h) * t);
+      sprite.alpha = from.alpha + (to.alpha - from.alpha) * t;
+      if (tween.elapsed < TWEEN_MS) continue;
+      this.#tweens.delete(sprite);
+      if (tween.dispose) {
+        this.#layer.removeChild(sprite);
+        sprite.destroy();
+      }
+    }
+  }
+
   #applyView(sprite: Sprite, view: ShapeView): void {
+    this.#tweens.delete(sprite); // a direct update wins over any running animation
+    this.#applyLook(sprite, view);
+    sprite.alpha = 1;
+    sprite.position.set(view.x, view.y);
+    sprite.setSize(view.w, view.h);
+  }
+
+  /** Texture and color only (geometry may be animated separately). */
+  #applyLook(sprite: Sprite, view: ShapeView): void {
     const texture = view.kind === "ellipse" && this.#circle ? this.#circle : Texture.WHITE;
     if (sprite.texture !== texture) sprite.texture = texture;
     sprite.tint = view.fill;
-    sprite.position.set(view.x, view.y);
-    sprite.setSize(view.w, view.h);
   }
 
   #drawCursors(v: Viewport): void {

@@ -5,9 +5,11 @@
  *
  *   open          IndexedDB → restored document → full patch to UI
  *   UI command    doc (local) → patch to UI → journal + push to server
+ *   undo / redo   doc.undo() → (a new local edit) → same path
  *   server delta  doc.merge → journal → patch to UI
+ *   history       server state at seq N → shapes to UI (read-only preview)
  */
-import { type CanvasDocument, touchedIds, type DocDelta } from "@canvas/doc";
+import { CanvasDocument, touchedIds, type DocDelta, type ShapeView } from "@canvas/doc";
 import { LocalStore, OfflineReplica } from "@canvas/sync/offline";
 import type { EditCommand, EngineCommand, EngineEvent, PatchEvent } from "./protocol";
 
@@ -19,19 +21,8 @@ const scope = self as unknown as WorkerScope;
 
 let ready: Promise<OfflineReplica | undefined> = Promise.resolve(undefined);
 let lastSeq = 0;
-
-function apply(doc: CanvasDocument, command: EditCommand): DocDelta {
-  switch (command.type) {
-    case "create":
-      return doc.createShapes(command.shapes);
-    case "update":
-      return doc.updateShapes(command.updates);
-    case "delete":
-      return doc.deleteShapes(command.ids);
-    case "front":
-      return doc.bringToFront(command.ids);
-  }
-}
+/** The most recently fetched history version, so "restore" uses exactly what was previewed. */
+let lastVersion: { at: number; shapes: readonly ShapeView[] } | undefined;
 
 function patchFor(doc: CanvasDocument, seq: number, delta: DocDelta, started: number, remote: boolean): PatchEvent {
   const upserts = [];
@@ -45,6 +36,47 @@ function patchFor(doc: CanvasDocument, seq: number, delta: DocDelta, started: nu
   const order = delta.tree.length > 0 ? doc.shapes().map((shape) => shape.id) : undefined;
   const engineMs = performance.now() - started;
   return order ? { ...base, order, engineMs } : { ...base, engineMs };
+}
+
+async function versionAt(replica: OfflineReplica, at: number): Promise<{ at: number; head: number; shapes: ShapeView[] }> {
+  const version = await replica.history(at);
+  const doc = new CanvasDocument("history-view"); // read-only: only ever merges
+  doc.merge(version.state);
+  return { at: version.at, head: version.head, shapes: doc.shapes() };
+}
+
+/** Run an edit and report what changed. Returns the delta to journal + sync. */
+async function edit(replica: OfflineReplica, command: EditCommand): Promise<DocDelta | undefined> {
+  const doc = replica.doc;
+  const options = "group" in command && command.group !== undefined ? { group: command.group } : undefined;
+  switch (command.type) {
+    case "create":
+      return doc.createShapes(command.shapes, options);
+    case "update":
+      return doc.updateShapes(command.updates, options);
+    case "delete":
+      return doc.deleteShapes(command.ids, options);
+    case "front":
+      return doc.bringToFront(command.ids, options);
+    case "undo":
+    case "redo": {
+      const result = command.type === "undo" ? doc.undo() : doc.redo();
+      scope.postMessage({
+        type: "undoState",
+        canUndo: doc.canUndo,
+        canRedo: doc.canRedo,
+        skipped: result?.skipped ?? 0,
+        action: command.type,
+      });
+      return result?.delta;
+    }
+    case "restore": {
+      const version = lastVersion?.at === command.at ? lastVersion : await versionAt(replica, command.at);
+      const delta = doc.restoreTo(version.shapes);
+      scope.postMessage({ type: "undoState", canUndo: doc.canUndo, canRedo: doc.canRedo, action: "restore" });
+      return delta;
+    }
+  }
 }
 
 async function open(url: string, docId: string, online: boolean): Promise<OfflineReplica> {
@@ -93,20 +125,40 @@ scope.addEventListener("message", (event) => {
     case "presence":
       void ready.then((replica) => replica?.setPresence(command.presence));
       return;
+    case "history":
+      void ready.then(async (replica) => {
+        if (!replica) return;
+        try {
+          const version = await versionAt(replica, command.at);
+          lastVersion = { at: version.at, shapes: version.shapes };
+          scope.postMessage({ type: "history", requestId: command.requestId, ...version });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          scope.postMessage({ type: "historyError", requestId: command.requestId, message });
+        }
+      });
+      return;
     default: {
       // Edits queue behind `ready`, so commands sent while IndexedDB loads aren't lost.
-      const edit = command;
-      void ready.then((replica) => {
-        if (!replica) return;
+      // (Each .then runs in order of registration, so edit order is preserved.)
+      const command_ = command;
+      ready = ready.then(async (replica) => {
+        if (!replica) return replica;
         const started = performance.now();
         try {
-          const delta = apply(replica.doc, edit);
-          lastSeq = edit.seq;
-          scope.postMessage(patchFor(replica.doc, edit.seq, delta, started, false));
-          replica.commit(delta);
+          const delta = await edit(replica, command_);
+          lastSeq = command_.seq;
+          if (delta) {
+            scope.postMessage(patchFor(replica.doc, command_.seq, delta, started, false));
+            replica.commit(delta);
+          }
+          if (command_.type !== "undo" && command_.type !== "redo" && command_.type !== "restore") {
+            scope.postMessage({ type: "undoState", canUndo: replica.doc.canUndo, canRedo: replica.doc.canRedo });
+          }
         } catch (error) {
-          scope.postMessage({ type: "error", seq: edit.seq, message: error instanceof Error ? error.message : String(error) });
+          scope.postMessage({ type: "error", seq: command_.seq, message: error instanceof Error ? error.message : String(error) });
         }
+        return replica;
       });
     }
   }

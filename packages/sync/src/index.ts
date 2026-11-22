@@ -21,6 +21,7 @@ export {
 } from "./presence.js";
 export {
   SyncClient,
+  type HistoryVersion,
   type OutboxItem,
   type RemoteDeltaInfo,
   type SocketLike,

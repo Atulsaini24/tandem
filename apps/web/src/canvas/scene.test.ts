@@ -33,6 +33,26 @@ describe("Scene", () => {
     expect(scene.ids()).toEqual(["a", "theirs", "mine"]);
   });
 
+  it("preview shows a past version, keeps the live doc updating underneath, and returns to it", () => {
+    const scene = new Scene();
+    scene.applyPatch({ type: "patch", seq: 1, upserts: [shape("a", 1), shape("b", 2)], removes: [], order: ["a", "b"], engineMs: 0, remote: false });
+    scene.dirty.clear();
+
+    scene.setPreview([shape("a", 100)]); // the past: only "a", somewhere else
+    expect(scene.previewing).toBe(true);
+    expect(scene.ordered()).toEqual([shape("a", 100)]);
+    expect([...scene.dirty].sort()).toEqual(["a", "b"]); // both change on screen
+    expect(scene.animate).toBe(true);
+
+    scene.dirty.clear();
+    scene.applyPatch({ type: "patch", seq: 2, upserts: [shape("c", 3)], removes: [], order: ["a", "b", "c"], engineMs: 0, remote: true });
+    expect(scene.dirty.size).toBe(0); // live change is invisible while previewing
+    expect(scene.get("c")).toBeUndefined();
+
+    scene.setPreview(null);
+    expect(scene.ordered().map((s) => s.id)).toEqual(["a", "b", "c"]); // live, including what arrived meanwhile
+  });
+
   it("tracks dirty shapes and order changes for the renderer", () => {
     const scene = new Scene();
     scene.addLocal([shape("a"), shape("b")], 1);

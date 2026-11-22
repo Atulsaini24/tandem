@@ -7,7 +7,7 @@ import type { Point } from "./viewport";
 type Mode =
   | { kind: "idle" }
   | { kind: "pan"; last: Point }
-  | { kind: "drag"; start: Point; origins: ReadonlyArray<{ id: NodeId; x: number; y: number }> }
+  | { kind: "drag"; start: Point; group: number; origins: ReadonlyArray<{ id: NodeId; x: number; y: number }> }
   | { kind: "marquee"; start: Point; base: ReadonlySet<NodeId> };
 
 /**
@@ -17,6 +17,10 @@ type Mode =
  *   drag on a shape      → move the selection
  *   space+drag / middle  → pan        wheel → pan        ctrl/⌘+wheel, pinch → zoom
  *   V / R / O            → tools      Delete → delete    ⌘A → select all    ] → to front
+ *   ⌘Z / ⌘⇧Z, Ctrl+Y     → undo / redo                  Esc → leave history / deselect
+ *
+ * While a past version is on screen (time travel), the canvas is read-only: pan and zoom
+ * still work, editing doesn't.
  */
 export class Controller {
   readonly #canvas: HTMLCanvasElement;
@@ -53,7 +57,8 @@ export class Controller {
     const ui = useUiStore.getState();
     this.#canvas.setPointerCapture(e.pointerId);
 
-    if (e.button === 1 || (e.button === 0 && this.#space)) {
+    const readOnly = this.#editor.scene.previewing;
+    if (e.button === 1 || (e.button === 0 && (this.#space || readOnly))) {
       this.#mode = { kind: "pan", last: screen };
       this.#cursor("grabbing");
       return;
@@ -88,7 +93,7 @@ export class Controller {
       const shape = scene.get(id);
       return shape ? [{ id, x: shape.x, y: shape.y }] : [];
     });
-    this.#mode = { kind: "drag", start: world, origins };
+    this.#mode = { kind: "drag", start: world, group: this.#editor.beginGroup(), origins };
     this.#cursor("move");
   }
 
@@ -105,7 +110,10 @@ export class Controller {
         const world = this.#editor.renderer.screenToWorld(screen);
         const dx = world.x - mode.start.x;
         const dy = world.y - mode.start.y;
-        this.#editor.moveLocal(mode.origins.map((o) => ({ id: o.id, x: o.x + dx, y: o.y + dy })));
+        this.#editor.moveLocal(
+          mode.origins.map((o) => ({ id: o.id, x: o.x + dx, y: o.y + dy })),
+          mode.group,
+        );
         return;
       }
       case "marquee": {
@@ -146,10 +154,18 @@ export class Controller {
       this.#space = true;
       return;
     }
-    if (e.key === "Delete" || e.key === "Backspace") {
+    if (mod && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) this.#editor.redo();
+      else this.#editor.undo();
+    } else if (mod && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      this.#editor.redo();
+    } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       this.#editor.deleteSelection();
     } else if (e.key === "Escape") {
+      if (this.#editor.scene.previewing || useUiStore.getState().history) this.#editor.closeHistory();
       this.#editor.select([]);
       useUiStore.getState().setTool("select");
     } else if (mod && e.key.toLowerCase() === "a") {
@@ -171,7 +187,7 @@ export class Controller {
   }
 
   #hoverCursor(screen: Point): void {
-    if (this.#space) return this.#cursor("grab");
+    if (this.#space || this.#editor.scene.previewing) return this.#cursor("grab");
     if (useUiStore.getState().tool !== "select") return this.#cursor("crosshair");
     const hit = hitTest(this.#editor.scene.ordered(), this.#editor.renderer.screenToWorld(screen));
     this.#cursor(hit === undefined ? "default" : "move");

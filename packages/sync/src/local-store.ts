@@ -165,6 +165,13 @@ export class LocalStore {
     this.#touch(record);
   }
 
+  /** The server lost data: our cursor must go back down to its head. */
+  resetCursor(docId: string, replicaId: string, cursor: number): void {
+    const record = this.#record(docId, replicaId);
+    record.cursor = cursor;
+    this.#touch(record);
+  }
+
   /** Replace snapshot + log with one snapshot of the current state. */
   compact(docId: string, replicaId: string, snapshot: Uint8Array): void {
     const record = this.#record(docId, replicaId);

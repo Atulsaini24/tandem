@@ -81,6 +81,16 @@ export class Editor {
     if (document.visibilityState === "hidden") this.#flushMoves();
   };
 
+  /** Each drag (or other gesture) gets a group id so it undoes as one step. */
+  #nextGroup = 1;
+  #pendingGroup: number | undefined;
+
+  // Time travel: one history request in flight at a time; while dragging the slider,
+  // only the latest position is fetched next (intermediate ones are skipped).
+  #nextRequestId = 1;
+  #historyInFlight: number | undefined;
+  #historyQueued: number | undefined;
+
   readonly #me = loadIdentity();
   #pointer: Point | null = null;
   #presenceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -164,6 +174,7 @@ export class Editor {
   }
 
   createShape(kind: ShapeKind, center: Point): void {
+    if (this.scene.previewing) return;
     const w = kind === "rect" ? 160 : 120;
     const h = kind === "rect" ? 100 : 120;
     const props: ShapeProps = { kind, x: center.x - w / 2, y: center.y - h / 2, w, h, fill: randomFill() };
@@ -175,8 +186,15 @@ export class Editor {
     useUiStore.getState().setTool("select");
   }
 
+  /** Start a gesture: every edit tagged with the returned group undoes as one step. */
+  beginGroup(): number {
+    this.#flushMoves(); // moves from a previous gesture must not join this one
+    return this.#nextGroup++;
+  }
+
   /** Move shapes now (optimistic) and queue the engine update for this frame. */
-  moveLocal(moves: ReadonlyArray<{ id: NodeId; x: number; y: number }>): void {
+  moveLocal(moves: ReadonlyArray<{ id: NodeId; x: number; y: number }>, group?: number): void {
+    if (this.scene.previewing) return;
     const seq = this.engine.nextSeq();
     this.scene.updateLocal(
       moves.map(({ id, x, y }) => ({ id, patch: { x, y } })),
@@ -184,12 +202,79 @@ export class Editor {
     );
     for (const { id, x, y } of moves) this.#pendingMoves.set(id, { x, y });
     this.#pendingSeq = seq;
+    this.#pendingGroup = group;
     this.#flushTimer ??= setTimeout(() => this.#flushMoves(), 50);
+  }
+
+  undo(): void {
+    if (this.scene.previewing) return;
+    this.#flushMoves();
+    this.engine.send({ type: "undo", seq: this.engine.nextSeq() });
+  }
+
+  redo(): void {
+    if (this.scene.previewing) return;
+    this.#flushMoves();
+    this.engine.send({ type: "redo", seq: this.engine.nextSeq() });
+  }
+
+  // --- time travel ---------------------------------------------------------
+
+  /** Open the history panel at the newest version. */
+  openHistory(): void {
+    if (useUiStore.getState().sync.status !== "online") {
+      useUiStore.getState().setNotice("History needs a connection to the server");
+      return;
+    }
+    this.#flushMoves();
+    this.select([]);
+    useUiStore.getState().setHistory({ at: Number.MAX_SAFE_INTEGER, head: 0, loading: true });
+    this.#requestHistory(Number.MAX_SAFE_INTEGER);
+  }
+
+  /** Show the document as it was at server seq `at` (animated). */
+  scrubHistory(at: number): void {
+    const history = useUiStore.getState().history;
+    if (!history) return;
+    useUiStore.getState().setHistory({ ...history, at, loading: true });
+    this.#requestHistory(at);
+  }
+
+  /** Make the live document match the previewed version (one undoable step), then go live. */
+  restoreVersion(): void {
+    const history = useUiStore.getState().history;
+    if (!history || history.loading) return;
+    this.engine.send({ type: "restore", seq: this.engine.nextSeq(), at: history.at });
+    this.closeHistory();
+    useUiStore.getState().setNotice(`Restored version ${history.at} — undo with ${navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl+"}Z`);
+  }
+
+  closeHistory(): void {
+    this.#historyQueued = undefined;
+    useUiStore.getState().setHistory(undefined);
+    this.scene.setPreview(null);
+  }
+
+  #requestHistory(at: number): void {
+    if (this.#historyInFlight !== undefined) {
+      this.#historyQueued = at; // only the latest slider position matters
+      return;
+    }
+    const requestId = this.#nextRequestId++;
+    this.#historyInFlight = requestId;
+    this.engine.send({ type: "history", requestId, at });
+  }
+
+  #onHistoryDone(): void {
+    this.#historyInFlight = undefined;
+    const queued = this.#historyQueued;
+    this.#historyQueued = undefined;
+    if (queued !== undefined && useUiStore.getState().history) this.#requestHistory(queued);
   }
 
   deleteSelection(): void {
     const ids = [...useUiStore.getState().selection];
-    if (ids.length === 0) return;
+    if (ids.length === 0 || this.scene.previewing) return;
     const seq = this.engine.nextSeq();
     this.scene.removeLocal(ids);
     this.engine.send({ type: "delete", seq, ids });
@@ -198,11 +283,12 @@ export class Editor {
 
   bringSelectionToFront(): void {
     const ids = [...useUiStore.getState().selection];
-    if (ids.length > 0) this.engine.send({ type: "front", seq: this.engine.nextSeq(), ids });
+    if (ids.length > 0 && !this.scene.previewing) this.engine.send({ type: "front", seq: this.engine.nextSeq(), ids });
   }
 
   /** Scatter `count` random shapes around the view, then zoom out to show them. */
   spawn(count: number): void {
+    if (this.scene.previewing) return;
     const { width, height } = this.renderer.screen;
     const center = this.renderer.screenToWorld({ x: width / 2, y: height / 2 });
     const zoom = this.renderer.viewport.zoom;
@@ -299,7 +385,8 @@ export class Editor {
     if (this.#pendingMoves.size === 0) return;
     const updates = [...this.#pendingMoves].map(([id, patch]) => ({ id, patch }));
     this.#pendingMoves.clear();
-    this.engine.send({ type: "update", seq: this.#pendingSeq, updates });
+    const group = this.#pendingGroup;
+    this.engine.send(group === undefined ? { type: "update", seq: this.#pendingSeq, updates } : { type: "update", seq: this.#pendingSeq, updates, group });
   }
 
   #schedulePresence(): void {
@@ -337,6 +424,25 @@ export class Editor {
         else if (event.pending > 0) {
           ui.setNotice(`Restored ${event.pending} unsynced edit${event.pending === 1 ? "" : "s"} from your last session`);
         } else if (event.resumed && event.shapes > 0) ui.setNotice(`Loaded ${event.shapes} shapes from this device`);
+        return;
+      case "undoState":
+        ui.setUndo(event);
+        if (event.skipped && event.skipped > 0) {
+          const verb = event.action === "redo" ? "redone" : "undone";
+          ui.setNotice(`${event.skipped} change${event.skipped === 1 ? " wasn't" : "s weren't"} ${verb}: someone else edited ${event.skipped === 1 ? "it" : "them"} since`);
+        }
+        return;
+      case "history": {
+        this.#onHistoryDone();
+        const history = ui.history;
+        if (!history) return; // closed while loading
+        ui.setHistory({ at: event.at, head: event.head, loading: this.#historyInFlight !== undefined });
+        this.scene.setPreview(event.shapes);
+        return;
+      }
+      case "historyError":
+        this.#onHistoryDone();
+        if (ui.history) ui.setHistory({ ...ui.history, loading: false, error: event.message });
         return;
       case "presence":
         if (this.peers.update(event.clientId, event.presence)) {

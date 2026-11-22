@@ -40,6 +40,13 @@ export interface SyncResume {
   readonly outbox: readonly OutboxItem[];
 }
 
+/** The document as it was at server seq `at` (of `head` total). */
+export interface HistoryVersion {
+  readonly at: number;
+  readonly head: number;
+  readonly state: DocDelta;
+}
+
 export interface RemoteDeltaInfo {
   readonly serverSeq: number;
   /** The exact bytes received, for persisting without re-encoding. */
@@ -57,6 +64,13 @@ export interface SyncClientOptions {
   readonly onAck?: (clientSeq: number, cursor: number) => void;
   /** Another client's presence payload, or null when they leave. */
   readonly onPresence?: (clientId: string, payload: Uint8Array | null) => void;
+  /**
+   * The server knows less than we do (its head < our cursor): it lost data, e.g. a
+   * restart with an in-memory store or a database restored from an older backup. The
+   * cursor has been reset to `head`; re-push what this client authored so the server
+   * (and everyone else) gets it back.
+   */
+  readonly onServerReset?: (head: number) => void;
   readonly initial?: SyncResume;
   readonly createSocket?: (url: string) => SocketLike;
   readonly minBackoffMs?: number;
@@ -116,6 +130,8 @@ export class SyncClient {
   #outbox: OutboxItem[];
   #nextClientSeq: number;
   #presence: Uint8Array | undefined;
+  readonly #history = new Map<number, { resolve: (v: HistoryVersion) => void; reject: (e: Error) => void }>();
+  #nextRequestId = 1;
   #attempt = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -156,7 +172,13 @@ export class SyncClient {
     this.#socket = undefined;
     this.#socketOpen = false;
     socket?.close(1000, "client stopped");
+    this.#failHistory("went offline");
     this.#setStatus("offline");
+  }
+
+  #failHistory(reason: string): void {
+    for (const pending of this.#history.values()) pending.reject(new Error(`history request failed: ${reason}`));
+    this.#history.clear();
   }
 
   /** Queue a local delta, send it now if connected, and return it (for persistence). */
@@ -167,6 +189,16 @@ export class SyncClient {
     if (this.#socketOpen) this.#sendPush(item);
     this.#emit();
     return item;
+  }
+
+  /** Ask the server for the document as it was at server seq `at`. Needs a connection. */
+  requestHistory(at: number): Promise<HistoryVersion> {
+    if (!this.#socketOpen) return Promise.reject(new Error("history needs a connection"));
+    const requestId = this.#nextRequestId++;
+    return new Promise((resolve, reject) => {
+      this.#history.set(requestId, { resolve, reject });
+      this.#send(encodeClientMessage({ type: "history", requestId, at: Math.max(0, Math.floor(at)) }));
+    });
   }
 
   /** Replace this client's presence. Sent now if connected, and again after every reconnect. */
@@ -213,6 +245,7 @@ export class SyncClient {
       if (this.#socket !== socket) return;
       this.#socket = undefined;
       this.#socketOpen = false;
+      this.#failHistory("connection closed");
       if (this.#enabled) this.#scheduleReconnect();
       else this.#setStatus("offline");
     };
@@ -225,6 +258,13 @@ export class SyncClient {
     switch (message.type) {
       case "welcome":
         this.#attempt = 0;
+        if (message.head < this.#cursor) {
+          // Without this, the server's new seqs 1, 2, 3… would all look "already seen"
+          // to us and every future edit from others would be silently dropped.
+          console.warn(`sync: server head ${message.head} is behind our cursor ${this.#cursor}; it lost data`);
+          this.#cursor = message.head;
+          this.#options.onServerReset?.(message.head);
+        }
         this.#setStatus("online");
         return;
       case "delta":
@@ -252,6 +292,13 @@ export class SyncClient {
       case "leave":
         this.#options.onPresence?.(message.clientId, null);
         return;
+      case "history": {
+        const pending = this.#history.get(message.requestId);
+        if (!pending) return;
+        this.#history.delete(message.requestId);
+        pending.resolve({ at: message.at, head: message.head, state: decodeDelta(message.state) });
+        return;
+      }
       case "error":
         if (message.fatal) {
           this.#error = message.message;

@@ -272,6 +272,46 @@ exponential smoothing, so 25 updates/s look like 60fps motion. Cursors are drawn
 space (same size at any zoom), and remote selections are outlined in their owner's color.
 Presence is decoded defensively: a malformed payload is ignored, never fatal.
 
+## D034 — Selective undo: restore only what is still yours
+An undo step records, for each value this replica wrote, the write's timestamp and the
+value it replaced. Undo restores a value only if that write is still in effect: the
+LWW entry's timestamp, or `MoveTree.placedBy` for placement. If anyone has written it since,
+their change stays, and the user is told how many shapes were left alone. The restore is
+a new write with a new timestamp that syncs like any edit; history is never rewritten.
+- **Retargeting:** after an undo restores a value under a new timestamp, other undo/redo
+  steps that referred to the original write are pointed at the new one. Found by the
+  property test ("create, delete, undo, undo" skipped the second undo without this).
+- **Grouping:** every step of a drag carries one group id and undoes as one step. Within
+  a step the first "before" and the latest timestamp win.
+- **Verified:** undo-all/redo-all returns to empty/end over 1,000 random histories, and
+  undoing all of Alice's edits never changes a property Bob owns (1,000 interleavings).
+  In the browser: Alice's undo skipped the shape Bob had moved since, restored the one he
+  hadn't, and Bob's own shape was untouched.
+- Considered: a global undo that reverts the last op regardless of author (surprising in
+  multiplayer); undo by inverse operations (wrong once others have edited the same thing).
+
+## D035 — History lives on the server; snapshots make it cheap
+The server's delta log is never truncated: it IS the document's history. Every 500
+deltas it stores a snapshot (the merged state). Two uses:
+- **Fast joins:** a client 50+ deltas behind a snapshot gets the snapshot as one big
+  (idempotent) delta, then only the tail. A late joiner to a 130-delta doc received 31
+  messages instead of 130.
+- **Time travel:** the state at seq N = nearest snapshot ≤ N + replaying at most 500
+  deltas. The client previews it read-only (live updates continue underneath), and the
+  canvas tweens between versions. "Restore" makes the live doc match the version as one
+  undoable step (`restoreTo`), so a restore never destroys anything.
+- Verified against an independent replay at 10 seqs, including both sides of snapshot
+  boundaries.
+
+## D036 — Recovering from server amnesia
+Found in the browser: a dev-server restart wiped the in-memory store, and the clients
+reconnected with cursors ahead of the server's head. The server's new seqs 1, 2, 3...
+looked "already seen", so every later edit would have been silently dropped. Now a WELCOME
+with head < cursor resets the cursor, and each client re-pushes the ops it authored
+itself (the server only accepts a client's own ops, D025). Together, the connected clients
+restore everything they know. The same applies to a database restored from an older
+backup. Tested; disabling the check makes the test fail.
+
 ## D013 — Tree correctness is checked against a reference implementation
 The test oracle is a 10-line naive version: sort every op by timestamp, replay from empty,
 skip cycles. The real engine must equal it for every delivery order. Mutation checks:

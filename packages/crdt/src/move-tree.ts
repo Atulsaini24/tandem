@@ -49,6 +49,8 @@ interface LogEntry {
   readonly op: MoveOp;
   /** The child's placement before this op ran, needed to undo it. */
   readonly previous: TreeNode | undefined;
+  /** Which op had placed the child before this one (for placedBy). */
+  readonly previousTs: Timestamp | undefined;
 }
 
 export class TreeCycleError extends Error {
@@ -77,6 +79,8 @@ export class MoveTree {
   readonly #nodes = new Map<NodeId, TreeNode>();
   /** parent → children index, so `children()` doesn't scan every node. */
   readonly #children = new Map<NodeId, Set<NodeId>>();
+  /** The timestamp of the op that currently determines each node's placement. */
+  readonly #placedBy = new Map<NodeId, Timestamp>();
   readonly #seen = new Set<string>();
 
   constructor(clock: HybridLogicalClock, ops?: TreeDelta) {
@@ -110,6 +114,15 @@ export class MoveTree {
         posA !== posB ? (posA < posB ? -1 : 1) : idA < idB ? -1 : idA > idB ? 1 : 0,
       )
       .map(([id]) => id);
+  }
+
+  /**
+   * The op currently in effect for a node's placement. Selective undo uses it: "is my
+   * move still the one that counts?" If someone moved the node since, the answer is
+   * no, and undoing my move must not yank it back.
+   */
+  placedBy(id: NodeId): Timestamp | undefined {
+    return this.#placedBy.get(id);
   }
 
   /** True if `ancestor` is `node` itself or any node above it. */
@@ -176,15 +189,19 @@ export class MoveTree {
 
   #apply(op: MoveOp): LogEntry {
     const previous = this.#nodes.get(op.child);
+    const previousTs = this.#placedBy.get(op.child);
     const createsCycle = this.isAncestor(op.child, op.parent);
     if (!isReserved(op.child) && !createsCycle) {
       this.#place(op.child, { parent: op.parent, position: op.position });
+      this.#placedBy.set(op.child, op.ts);
     }
-    return { op, previous };
+    return { op, previous, previousTs };
   }
 
   #undo(entry: LogEntry): void {
     this.#place(entry.op.child, entry.previous);
+    if (entry.previousTs === undefined) this.#placedBy.delete(entry.op.child);
+    else this.#placedBy.set(entry.op.child, entry.previousTs);
   }
 
   /** The only place nodes change, so the children index can never drift. */

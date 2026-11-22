@@ -1,13 +1,23 @@
 /**
- * Durable, append-only log of deltas per document.
+ * Durable, append-only log of deltas per document, plus periodic snapshots.
  *
  * The server never interprets deltas beyond validation: it stores the exact bytes a
  * client pushed, numbered 1, 2, 3… per document. That number (serverSeq) is the only
  * cursor a client needs: "send me everything after N".
+ *
+ * Snapshots are the merged document state at some seq. They make joining fast
+ * (snapshot + tail instead of the whole log) and history cheap (nearest snapshot +
+ * a short replay). The log itself is never truncated: it IS the document's history.
  */
 export interface StoredDelta {
   readonly seq: number;
   readonly delta: Uint8Array;
+}
+
+export interface StoredSnapshot {
+  readonly seq: number;
+  /** An encoded DocDelta holding the full merged state at `seq`. */
+  readonly state: Uint8Array;
 }
 
 export interface Store {
@@ -18,14 +28,19 @@ export interface Store {
    * Callers must serialize appends per document (see Room).
    */
   append(docId: string, clientId: string, clientSeq: number, delta: Uint8Array): Promise<number | "duplicate">;
-  readSince(docId: string, since: number): Promise<StoredDelta[]>;
+  /** Deltas with since < seq ≤ until (until defaults to the head), in order. */
+  readSince(docId: string, since: number, until?: number): Promise<StoredDelta[]>;
   head(docId: string): Promise<number>;
+  putSnapshot(docId: string, snapshot: StoredSnapshot): Promise<void>;
+  /** The latest snapshot with seq ≤ atOrBefore (default: the latest of all). */
+  snapshot(docId: string, atOrBefore?: number): Promise<StoredSnapshot | undefined>;
   close(): Promise<void>;
 }
 
 interface MemoryDoc {
   readonly entries: StoredDelta[];
   readonly seen: Set<string>;
+  readonly snapshots: StoredSnapshot[];
 }
 
 /** In-process store: tests, and running the server without a database. */
@@ -43,12 +58,23 @@ export class MemoryStore implements Store {
     return seq;
   }
 
-  async readSince(docId: string, since: number): Promise<StoredDelta[]> {
-    return this.#doc(docId).entries.slice(since);
+  async readSince(docId: string, since: number, until?: number): Promise<StoredDelta[]> {
+    return this.#doc(docId).entries.slice(since, until);
   }
 
   async head(docId: string): Promise<number> {
     return this.#doc(docId).entries.length;
+  }
+
+  async putSnapshot(docId: string, snapshot: StoredSnapshot): Promise<void> {
+    const snapshots = this.#doc(docId).snapshots;
+    if (snapshots.some((s) => s.seq === snapshot.seq)) return;
+    snapshots.push(snapshot);
+    snapshots.sort((a, b) => a.seq - b.seq);
+  }
+
+  async snapshot(docId: string, atOrBefore = Infinity): Promise<StoredSnapshot | undefined> {
+    return this.#doc(docId).snapshots.filter((s) => s.seq <= atOrBefore).at(-1);
   }
 
   async close(): Promise<void> {}
@@ -61,7 +87,7 @@ export class MemoryStore implements Store {
   #doc(docId: string): MemoryDoc {
     let doc = this.#docs.get(docId);
     if (!doc) {
-      doc = { entries: [], seen: new Set() };
+      doc = { entries: [], seen: new Set(), snapshots: [] };
       this.#docs.set(docId, doc);
     }
     return doc;

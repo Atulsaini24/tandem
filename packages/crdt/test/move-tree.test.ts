@@ -54,6 +54,24 @@ function referenceTree(ops: readonly MoveOp[]): Array<readonly [NodeId, TreeNode
  * Independent acyclicity check: walking up from any node must terminate.
  * Also checks the children index agrees with every node's parent pointer.
  */
+/** Reference for placedBy: the timestamp of the last op (in ts order) that was applied. */
+function referencePlacedBy(ops: readonly MoveOp[]): Map<NodeId, MoveOp["ts"]> {
+  const parents = new Map<NodeId, NodeId>();
+  const placed = new Map<NodeId, MoveOp["ts"]>();
+  const isAncestor = (ancestor: NodeId, node: NodeId): boolean => {
+    for (let current: NodeId | undefined = node; current !== undefined; current = parents.get(current)) {
+      if (current === ancestor) return true;
+    }
+    return false;
+  };
+  for (const op of [...ops].sort((a, b) => compareTimestamps(a.ts, b.ts))) {
+    if (op.child === ROOT || op.child === TRASH || isAncestor(op.child, op.parent)) continue;
+    parents.set(op.child, op.parent);
+    placed.set(op.child, op.ts);
+  }
+  return placed;
+}
+
 function expectAcyclic(t: MoveTree): void {
   const parents = new Set(t.nodes().map(([, node]) => node.parent));
   for (const parent of parents) {
@@ -247,9 +265,12 @@ describe("MoveTree convergence", () => {
       fc.assert(
         fc.property(stepsArb(opArb, scenario.replicaCount), fc.nat(), (steps, seed) => {
           const { replicas, sent } = simulate(scenario, steps, seed);
-          const expected = referenceTree(sent.flatMap(({ delta }) => delta));
+          const allOps = sent.flatMap(({ delta }) => delta);
+          const expected = referenceTree(allOps);
+          const placed = referencePlacedBy(allOps);
           for (const replica of replicas) {
             expect(replica.nodes()).toEqual(expected);
+            for (const [id] of expected) expect(replica.placedBy(id)).toEqual(placed.get(id));
             expectAcyclic(replica);
           }
         }),

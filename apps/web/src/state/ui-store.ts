@@ -39,6 +39,16 @@ export interface SyncUiState {
   readonly docId: string;
 }
 
+/** Time travel: which version is on screen. Undefined = the live document. */
+export interface HistoryUiState {
+  /** Server seq being previewed. */
+  readonly at: number;
+  /** Total versions available (the server's head when last fetched). */
+  readonly head: number;
+  readonly loading: boolean;
+  readonly error?: string;
+}
+
 export interface Person {
   readonly clientId: string;
   readonly name: string;
@@ -56,6 +66,11 @@ interface UiState {
   readonly me: Omit<Person, "clientId"> | undefined;
   /** A transient message, e.g. "Restored 3 unsynced edits". */
   readonly notice: string | undefined;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly history: HistoryUiState | undefined;
+  setUndo(state: { canUndo: boolean; canRedo: boolean }): void;
+  setHistory(history: HistoryUiState | undefined): void;
   setTool(tool: Tool): void;
   setSelection(selection: ReadonlySet<NodeId>): void;
   setStats(stats: Partial<Stats>): void;
@@ -80,6 +95,11 @@ export const useUiStore = create<UiState>()((set) => ({
   peers: [],
   me: undefined,
   notice: undefined,
+  canUndo: false,
+  canRedo: false,
+  history: undefined,
+  setUndo: ({ canUndo, canRedo }) => set({ canUndo, canRedo }),
+  setHistory: (history) => set({ history }),
   setTool: (tool) => set({ tool }),
   setPeers: (peers) => set({ peers }),
   setMe: (me) => set({ me }),

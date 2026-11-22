@@ -116,6 +116,37 @@ describe("M6 gate: refresh while offline", () => {
   });
 });
 
+describe("server amnesia", () => {
+  it("clients recover when the server comes back with less data than they've seen", async () => {
+    const first = await serve();
+    const port = first.port;
+    const alice = await tab(first, browserProfile());
+    const bob = await tab(first, browserProfile());
+    alice.start();
+    bob.start();
+    alice.commit(alice.doc.createShapes([{ id: "from-alice", props: rect(1) }]));
+    bob.commit(bob.doc.createShapes([{ id: "from-bob", props: rect(2) }]));
+    for (let i = 0; i < 5; i++) alice.commit(alice.doc.updateShapes([{ id: "from-alice", patch: { x: i } }]));
+    await until(() => alice.sync.pending === 0 && bob.sync.pending === 0 && bob.doc.shape("from-alice")?.x === 4, "synced");
+    expect(alice.sync.cursor).toBe(7);
+
+    // The server restarts with an EMPTY store (in-memory store, or an old backup).
+    await first.close();
+    const second = await startSyncServer({ store: new MemoryStore(), host: "127.0.0.1", port });
+    cleanup.push(() => second.close());
+    await until(() => alice.sync.status === "online" && bob.sync.status === "online" && alice.sync.cursor < 7, "reconnected + reset");
+
+    // New edits must still flow (before the fix, both would ignore seqs 1..7 as "seen").
+    alice.commit(alice.doc.updateShapes([{ id: "from-alice", patch: { x: 999 } }]));
+    await until(() => bob.doc.shape("from-alice")?.x === 999, "new edit reaches bob");
+
+    // And the server has been re-seeded: a newcomer sees everyone's shapes.
+    const carol = await tab(second, browserProfile());
+    carol.start();
+    await until(() => carol.doc.shape("from-alice")?.x === 999 && carol.doc.shape("from-bob") !== undefined, "carol sees all");
+  });
+});
+
 describe("M6 gate: live presence", () => {
   it("relays cursors and selections, replays them to late joiners, and removes them on leave", async () => {
     const server = await serve();

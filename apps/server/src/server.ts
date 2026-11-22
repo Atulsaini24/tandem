@@ -1,10 +1,12 @@
 import { createServer } from "node:http";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
+import { CanvasDocument } from "@canvas/doc";
 import {
   DecodeError,
   PROTOCOL_VERSION,
   decodeClientMessage,
   decodeDelta,
+  encodeDelta,
   encodeServerMessage,
   timestampsOf,
   type ClientMessage,
@@ -20,11 +22,23 @@ export interface SyncServerOptions {
   readonly maxDriftMs?: number;
   readonly maxPayloadBytes?: number;
   readonly now?: () => number;
+  /** Write a snapshot of the merged state every N deltas. */
+  readonly snapshotEvery?: number;
+  /** Catch a client up with a snapshot only if it's at least this many deltas behind it. */
+  readonly snapshotMinGap?: number;
 }
 
 export interface SyncServer {
   readonly port: number;
-  readonly stats: { connections: number; pushes: number; duplicates: number; rejected: number };
+  readonly stats: {
+    connections: number;
+    pushes: number;
+    duplicates: number;
+    rejected: number;
+    snapshotsWritten: number;
+    snapshotsSent: number;
+    historyServed: number;
+  };
   close(): Promise<void>;
 }
 
@@ -78,7 +92,17 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
   const maxDriftMs = options.maxDriftMs ?? 60_000;
   const now = options.now ?? Date.now;
   const rooms = new Map<string, Room>();
-  const stats = { connections: 0, pushes: 0, duplicates: 0, rejected: 0 };
+  const snapshotEvery = options.snapshotEvery ?? 500;
+  const snapshotMinGap = options.snapshotMinGap ?? 50;
+  const stats = {
+    connections: 0,
+    pushes: 0,
+    duplicates: 0,
+    rejected: 0,
+    snapshotsWritten: 0,
+    snapshotsSent: 0,
+    historyServed: 0,
+  };
 
   const http = createServer((req, res) => {
     if (req.url === "/health") {
@@ -110,7 +134,17 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
     // Inside the room queue: the backlog and joining the broadcast set happen with no
     // append in between, so the client can't miss or double-receive a delta.
     void room.run(async () => {
-      for (const entry of await store.readSince(room.docId, message.since)) {
+      // Far behind (or brand new)? Send the latest snapshot as one big delta, then only
+      // the tail after it. A snapshot is just the merge of everything up to its seq, so to
+      // the client it's an ordinary (idempotent) delta with serverSeq = snapshot.seq.
+      let from = message.since;
+      const snapshot = await store.snapshot(room.docId);
+      if (snapshot && snapshot.seq - message.since >= snapshotMinGap) {
+        conn.send({ type: "delta", serverSeq: snapshot.seq, delta: snapshot.state });
+        stats.snapshotsSent += 1;
+        from = snapshot.seq;
+      }
+      for (const entry of await store.readSince(room.docId, from)) {
         conn.send({ type: "delta", serverSeq: entry.seq, delta: entry.delta });
       }
       room.clients.add(conn);
@@ -185,6 +219,33 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
       conn.send({ type: "ack", clientSeq: message.clientSeq, serverSeq: result });
       const relay = encodeServerMessage({ type: "delta", serverSeq: result, delta: message.delta });
       for (const other of room.clients) if (other !== conn) other.sendRaw(relay);
+      if (result % snapshotEvery === 0) {
+        await store.putSnapshot(room.docId, { seq: result, state: await stateAt(room.docId, result) });
+        stats.snapshotsWritten += 1;
+      }
+    });
+  }
+
+  /**
+   * The merged document at `seq`: nearest snapshot at or before it, plus a replay of
+   * the deltas after it. At most `snapshotEvery` deltas are replayed.
+   */
+  async function stateAt(docId: string, seq: number): Promise<Uint8Array> {
+    const doc = new CanvasDocument("server"); // never writes, only merges
+    const snapshot = await store.snapshot(docId, seq);
+    if (snapshot) doc.merge(decodeDelta(snapshot.state));
+    for (const entry of await store.readSince(docId, snapshot?.seq ?? 0, seq)) doc.merge(decodeDelta(entry.delta));
+    return encodeDelta(doc.state);
+  }
+
+  function history(conn: Connection, message: Extract<ClientMessage, { type: "history" }>): void {
+    const room = conn.room;
+    if (!room) return conn.reject("history before hello");
+    void room.run(async () => {
+      const head = await store.head(room.docId);
+      const at = Math.min(message.at, head);
+      conn.send({ type: "history", requestId: message.requestId, at, head, state: await stateAt(room.docId, at) });
+      stats.historyServed += 1;
     });
   }
 
@@ -202,6 +263,7 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
       }
       if (message.type === "hello") hello(conn, message);
       else if (message.type === "push") push(conn, message);
+      else if (message.type === "history") history(conn, message);
       else presence(conn, message.payload);
     });
     socket.on("close", () => leave(conn));

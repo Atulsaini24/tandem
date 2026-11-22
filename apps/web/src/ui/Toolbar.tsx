@@ -58,9 +58,34 @@ function ActionButton({ onClick, disabled, children, title }: { onClick: () => v
   );
 }
 
+function IconButton({ title, disabled, onClick, path }: { title: string; disabled: boolean; onClick: () => void; path: string }) {
+  return (
+    <motion.button
+      type="button"
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
+      whileTap={disabled ? {} : { scale: 0.9 }}
+      transition={spring}
+      className="grid h-10 w-10 place-items-center rounded-full text-ink transition-colors hover:bg-black/5 disabled:cursor-default disabled:opacity-25 disabled:hover:bg-transparent"
+    >
+      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-ink" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <path d={path} />
+      </svg>
+    </motion.button>
+  );
+}
+
+const MOD = typeof navigator !== "undefined" && navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl+";
+
 export function Toolbar({ editor }: { editor: Editor | null }) {
   const selected = useUiStore((s) => s.selection.size);
   const benchRunning = useUiStore((s) => s.bench === "running");
+  const canUndo = useUiStore((s) => s.canUndo);
+  const canRedo = useUiStore((s) => s.canRedo);
+  const historyOpen = useUiStore((s) => s.history !== undefined);
+  const online = useUiStore((s) => s.sync.status === "online");
   return (
     <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center px-4">
       <motion.div
@@ -73,7 +98,27 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
           <ToolButton key={tool.id} tool={tool} />
         ))}
         <span className="mx-1 h-6 w-px bg-line" />
-        <ActionButton title="Add 5,000 random shapes" disabled={!editor} onClick={() => editor?.spawn(5_000)}>
+        <IconButton
+          title={`Undo (${MOD}Z)`}
+          disabled={!editor || !canUndo || historyOpen}
+          onClick={() => editor?.undo()}
+          path="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11"
+        />
+        <IconButton
+          title={`Redo (${MOD}⇧Z)`}
+          disabled={!editor || !canRedo || historyOpen}
+          onClick={() => editor?.redo()}
+          path="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13"
+        />
+        <ActionButton
+          title={online ? "Browse and restore earlier versions" : "History needs a connection"}
+          disabled={!editor || !online}
+          onClick={() => (historyOpen ? editor?.closeHistory() : editor?.openHistory())}
+        >
+          {historyOpen ? "Close history" : "History"}
+        </ActionButton>
+        <span className="mx-1 h-6 w-px bg-line" />
+        <ActionButton title="Add 5,000 random shapes" disabled={!editor || historyOpen} onClick={() => editor?.spawn(5_000)}>
           +5,000
         </ActionButton>
         <ActionButton
@@ -83,7 +128,7 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
         >
           {benchRunning ? "Measuring…" : "Benchmark"}
         </ActionButton>
-        <ActionButton title="Delete selection (Del)" disabled={!editor || selected === 0} onClick={() => editor?.deleteSelection()}>
+        <ActionButton title="Delete selection (Del)" disabled={!editor || selected === 0 || historyOpen} onClick={() => editor?.deleteSelection()}>
           Delete
         </ActionButton>
       </motion.div>

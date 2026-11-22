@@ -8,6 +8,8 @@ export {
   touchedIds,
   validatePatch,
   type DocDelta,
+  type EditOptions,
+  type UndoResult,
   type PropValue,
   type PropsDelta,
   type ShapeKind,

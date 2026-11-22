@@ -89,6 +89,26 @@ for (const backend of backends) {
       expect((await store.readSince(doc, 0)).length).toBe(4);
     });
 
+    it("reads a bounded range (since < seq ≤ until)", async () => {
+      const store = await backend.open();
+      const doc = docId("range");
+      for (let i = 1; i <= 5; i++) await store.append(doc, "c", i, bytes(i));
+      expect((await store.readSince(doc, 1, 3)).map((e) => e.seq)).toEqual([2, 3]);
+      expect((await store.readSince(doc, 3)).map((e) => e.seq)).toEqual([4, 5]);
+    });
+
+    it("finds the latest snapshot at or before a seq", async () => {
+      const store = await backend.open();
+      const doc = docId("snap");
+      expect(await store.snapshot(doc)).toBeUndefined();
+      await store.putSnapshot(doc, { seq: 500, state: bytes(5) });
+      await store.putSnapshot(doc, { seq: 1000, state: bytes(10) });
+      await store.putSnapshot(doc, { seq: 1000, state: bytes(99) }); // same seq again: first one stays
+      expect(await store.snapshot(doc)).toEqual({ seq: 1000, state: bytes(10) });
+      expect(await store.snapshot(doc, 999)).toEqual({ seq: 500, state: bytes(5) });
+      expect(await store.snapshot(doc, 499)).toBeUndefined();
+    });
+
     it("keeps the log and the dedupe record across a reconnect", async () => {
       const first = await backend.open();
       const doc = docId("restart");

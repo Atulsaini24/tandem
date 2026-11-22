@@ -1,6 +1,6 @@
 import { CanvasDocument, type DocDelta } from "@canvas/doc";
 import { decodeDelta, encodeDelta } from "./codec.js";
-import { SyncClient, type SocketLike, type SyncResume, type SyncState } from "./client.js";
+import { SyncClient, type HistoryVersion, type SocketLike, type SyncResume, type SyncState } from "./client.js";
 import type { LoadedReplica, LocalStore } from "./local-store.js";
 import { decodePresence, encodePresence, type Presence } from "./presence.js";
 
@@ -92,6 +92,12 @@ export class OfflineReplica {
         options.onRemote?.(delta);
       },
       onAck: (clientSeq, cursor) => this.#storage?.recordAck(this.docId, this.replicaId, clientSeq, cursor),
+      onServerReset: (head) => {
+        this.#storage?.resetCursor(this.docId, this.replicaId, head);
+        // The server only accepts ops a client authored itself, so each client re-seeds
+        // its own share. Together, every connected client restores everything it knows.
+        this.commit(this.doc.authoredBy(this.replicaId));
+      },
       onPresence: (clientId, payload) => {
         if (!options.onPresence) return;
         if (payload === null) return options.onPresence(clientId, null);
@@ -173,6 +179,11 @@ export class OfflineReplica {
     if (!item || !this.#storage) return;
     this.#storage.recordLocal(this.docId, this.replicaId, item);
     this.#maybeCompact();
+  }
+
+  /** The document as it was at server seq `at` (needs a connection). */
+  history(at: number): Promise<HistoryVersion> {
+    return this.sync.requestHistory(at);
   }
 
   setPresence(presence: Presence): void {

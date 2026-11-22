@@ -59,7 +59,7 @@ export function Avatars() {
   );
 }
 
-/** A transient message at the bottom center, e.g. "Restored 3 unsynced edits". */
+/** A transient message under the toolbar, e.g. "Restored 3 unsynced edits". */
 export function Notice() {
   const notice = useUiStore((s) => s.notice);
   const setNotice = useUiStore((s) => s.setNotice);
@@ -69,15 +69,15 @@ export function Notice() {
     return () => clearTimeout(timer);
   }, [notice, setNotice]);
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-4">
+    <div className="pointer-events-none absolute inset-x-0 top-20 flex justify-center px-4">
       <AnimatePresence>
         {notice && (
           <motion.div
             key={notice}
             role="status"
-            initial={{ y: 24, opacity: 0, scale: 0.96 }}
+            initial={{ y: -16, opacity: 0, scale: 0.96 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
-            exit={{ y: 12, opacity: 0 }}
+            exit={{ y: -10, opacity: 0 }}
             transition={spring}
             className="rounded-full bg-ink px-5 py-3 text-[13px] font-semibold text-white shadow-[0_12px_32px_rgba(17,19,24,0.25)]"
           >
