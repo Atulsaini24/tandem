@@ -1,34 +1,95 @@
-import { Application, Container, Graphics, Sprite, Text, Texture, TilingSprite } from "pixi.js";
+import { Application, Container, Graphics, NineSliceSprite, Sprite, Text, Texture, TilingSprite } from "pixi.js";
 import type { NodeId, ShapeView } from "@canvas/doc";
-import { boundsOf, type Rect } from "./hit-test";
+import {
+  FRAME_TITLE_H,
+  arrowEnds,
+  boundsOf,
+  corners,
+  handlePositions,
+  visualBounds,
+  type Rect,
+} from "./geometry";
 import type { Peer, Peers } from "./peers";
 import type { Scene } from "./scene";
+import { CANVAS_THEMES, displayFill, inkColor, labelColor, type CanvasTheme } from "./theme";
 import { clampZoom, panBy, screenToWorld, stepZoom, worldToScreen, type Point, type Viewport } from "./viewport";
 
-/** A sprite gliding between two states (time-travel transitions). */
+/** Geometry a node is drawn with right now (it may be mid-animation). */
+interface Pose {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number;
+  alpha: number;
+}
+
 interface Tween {
-  readonly from: { x: number; y: number; w: number; h: number; alpha: number };
-  readonly to: { x: number; y: number; w: number; h: number; alpha: number };
+  readonly from: Pose;
+  readonly to: Pose;
   elapsed: number;
-  /** Destroy the sprite when the tween ends (it faded out of existence). */
+  /** Destroy the node when the tween ends (it faded out of existence). */
   readonly dispose: boolean;
 }
 
-const TWEEN_MS = 320;
-
-/** Dark text on light fills, white on dark ones (perceived luminance). */
-function labelColor(fill: number): number {
-  const r = (fill >> 16) & 0xff;
-  const g = (fill >> 8) & 0xff;
-  const b = fill & 0xff;
-  return 0.299 * r + 0.587 * g + 0.114 * b > 165 ? 0x111318 : 0xffffff;
+/**
+ * One shape on screen. `holder` sits at the shape's center and carries its rotation, so
+ * the body, label and shadow rotate together. Rectangles and ellipses are sprites of a
+ * few shared textures (tinted), so thousands of them still batch into a handful of draw
+ * calls. Diamonds, frames, arrows, pen strokes and comments are vector Graphics.
+ */
+interface ShapeNode {
+  readonly id: NodeId;
+  readonly holder: Container;
+  body: Sprite | NineSliceSprite | Graphics | undefined;
+  bodyType: "nine" | "circle" | "graphics" | "none";
+  shadow: NineSliceSprite | undefined;
+  label: Text | undefined;
+  /** Extra text (frame titles, comment authors). */
+  caption: Text | undefined;
+  pose: Pose;
+  view: ShapeView;
+  /** Cache key of what a Graphics body was last drawn with. */
+  drawn: string;
 }
+
+/** A floating emoji reaction (screen space). */
+interface Floater {
+  readonly text: Text;
+  readonly start: Point;
+  elapsed: number;
+  readonly drift: number;
+}
+
+export interface Guide {
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+}
+
+/** What the active tool is drawing before it becomes a shape. */
+export type Draft =
+  | { readonly kind: "box"; readonly shape: "rect" | "ellipse" | "diamond" | "frame" | "text"; readonly rect: Rect }
+  | { readonly kind: "arrow"; readonly a: Point; readonly b: Point }
+  | { readonly kind: "path"; readonly points: readonly Point[]; readonly color: number };
+
+const TWEEN_MS = 320;
+const FLOAT_MS = 1_700;
+const GRID_SPACING = 24;
+/** Above this many selected shapes, draw one bounding box instead of every outline. */
+const MAX_OUTLINES = 300;
+const FONT = "Inter, Helvetica Neue, Arial, sans-serif";
 const easeOutCubic = (t: number): number => 1 - (1 - t) ** 3;
+const poseOf = (v: ShapeView, alpha = 1): Pose => ({ x: v.x, y: v.y, w: v.w, h: v.h, rotation: v.rotation ?? 0, alpha });
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 interface CursorView {
   readonly root: Container;
   readonly name: string;
   readonly color: number;
+  chat: Container | undefined;
+  chatText: string;
 }
 
 /** A remote cursor: arrow + name tag, drawn in screen space so it stays the same size at any zoom. */
@@ -38,31 +99,25 @@ function buildCursor(name: string, color: number): CursorView {
     .poly([0, 0, 0, 17, 4.6, 12.8, 7.6, 19.2, 10.4, 18, 7.4, 11.7, 13, 11.7])
     .fill(color)
     .stroke({ width: 1.5, color: 0xffffff, alignment: 0 });
-  const label = new Text({
-    text: name,
-    style: { fontFamily: "Inter, Helvetica Neue, Arial, sans-serif", fontSize: 11, fontWeight: "700", fill: 0xffffff },
-  });
+  const label = new Text({ text: name, style: { fontFamily: FONT, fontSize: 11, fontWeight: "700", fill: 0xffffff } });
   label.position.set(20, 19);
   const tag = new Graphics().roundRect(14, 16, label.width + 12, 18, 9).fill(color);
   root.addChild(arrow, tag, label);
-  return { root, name, color };
+  return { root, name, color, chat: undefined, chatText: "" };
 }
 
-const BACKGROUND = 0xf3f0e8;
-const GRID_DOT = 0xc9c4b8;
-const GRID_SPACING = 24;
-const SELECTION = 0x2f63ff;
-/** Above this many selected shapes, draw one bounding box instead of every outline. */
-const MAX_OUTLINES = 300;
+function buildChat(text: string, color: number): Container {
+  const root = new Container();
+  const label = new Text({
+    text,
+    style: { fontFamily: FONT, fontSize: 14, fontWeight: "600", fill: 0xffffff, wordWrap: true, wordWrapWidth: 220, breakWords: true },
+  });
+  label.position.set(26, 42);
+  const bubble = new Graphics().roundRect(14, 36, label.width + 24, label.height + 12, 14).fill(color);
+  root.addChild(bubble, label);
+  return root;
+}
 
-/**
- * Draws the Scene with PixiJS.
- *
- * Every shape is a Sprite of one shared texture (a white pixel or a white circle),
- * colored with `tint` and sized with scale. Same texture + same blend mode means
- * Pixi's batcher draws thousands of shapes in a handful of draw calls, and moving
- * a shape is a transform change, never a re-tessellation.
- */
 export class Renderer {
   readonly app = new Application();
   readonly frameListeners = new Set<(dtMs: number) => void>();
@@ -72,26 +127,35 @@ export class Renderer {
   readonly #getSelection: () => ReadonlySet<NodeId>;
   readonly #peers: Peers;
   readonly #cursorLayer = new Container();
+  readonly #floatLayer = new Container();
   readonly #cursors = new Map<string, CursorView>();
+  readonly #floaters: Floater[] = [];
   #peersVersion = -1;
   readonly #world = new Container();
   readonly #layer = new Container();
   readonly #overlay = new Graphics();
-  readonly #sprites = new Map<NodeId, Sprite>();
-  readonly #tweens = new Map<Sprite, Tween>();
-  /** Labels live on their own layer above all shapes, positioned to follow their sprite. */
-  readonly #labels = new Container();
-  readonly #texts = new Map<NodeId, Text>();
-  readonly #spriteIds = new WeakMap<Sprite, NodeId>();
+  readonly #nodes = new Map<NodeId, ShapeNode>();
+  readonly #tweens = new Map<ShapeNode, Tween>();
+  readonly #dying = new Set<ShapeNode>();
+  readonly #arrows = new Set<NodeId>();
   #grid: TilingSprite | undefined;
   #circle: Texture | undefined;
+  #rounded: Texture | undefined;
+  #soft: Texture | undefined;
   #dot: Texture | undefined;
+  #theme: CanvasTheme = CANVAS_THEMES.light;
   #zoomTarget = 1;
   #zoomAnchor: Point = { x: 0, y: 0 };
-  #flight: { from: Viewport; to: Viewport; elapsed: number } | undefined;
+  #flight: { from: Viewport; to: Viewport; elapsed: number; ms: number } | undefined;
   #overlayDirty = true;
+  #arrowsDirty = false;
   #lastSelection: ReadonlySet<NodeId> | undefined;
   #marquee: Rect | undefined;
+  #guides: readonly Guide[] = [];
+  #draft: Draft | undefined;
+  #attachTarget: NodeId | undefined;
+  #hiddenLabel: NodeId | undefined;
+  #showHandles = true;
 
   constructor(scene: Scene, getSelection: () => ReadonlySet<NodeId>, peers: Peers) {
     this.#scene = scene;
@@ -99,10 +163,11 @@ export class Renderer {
     this.#peers = peers;
   }
 
-  async init(host: HTMLElement): Promise<void> {
+  async init(host: HTMLElement, theme: CanvasTheme): Promise<void> {
+    this.#theme = theme;
     await this.app.init({
       resizeTo: host,
-      background: BACKGROUND,
+      background: theme.background,
       antialias: true,
       autoDensity: true,
       resolution: Math.min(window.devicePixelRatio, 2),
@@ -110,36 +175,77 @@ export class Renderer {
     });
     host.appendChild(this.app.canvas);
 
-    this.#circle = this.app.renderer.generateTexture({
-      target: new Graphics().circle(128, 128, 128).fill(0xffffff),
-      antialias: true,
-    });
-    this.#dot = this.app.renderer.generateTexture({
-      target: new Graphics()
-        .rect(0, 0, GRID_SPACING, GRID_SPACING)
-        .fill({ color: BACKGROUND, alpha: 0 })
-        .circle(GRID_SPACING / 2, GRID_SPACING / 2, 1.1)
-        .fill(GRID_DOT),
-      resolution: 2,
-    });
+    const gen = (g: Graphics): Texture => this.app.renderer.generateTexture({ target: g, antialias: true, resolution: 2 });
+    this.#circle = gen(new Graphics().circle(128, 128, 128).fill(0xffffff));
+    this.#rounded = gen(new Graphics().roundRect(0, 0, 48, 48, 9).fill(0xffffff));
+    // A soft-edged rounded rect: stacked translucent layers read as a blurred shadow.
+    const soft = new Graphics();
+    for (let i = 0; i < 10; i++) soft.roundRect(i, i, 64 - i * 2, 64 - i * 2, 20 - i).fill({ color: 0xffffff, alpha: 0.1 });
+    this.#soft = gen(soft);
+    this.#dot = this.#makeDot(theme);
     this.#grid = new TilingSprite({ texture: this.#dot, width: this.app.screen.width, height: this.app.screen.height });
 
-    // No Pixi hit-testing: we do our own (see hit-test.ts).
+    // No Pixi hit-testing: we do our own (see geometry.ts).
     this.app.stage.eventMode = "none";
-    this.#world.addChild(this.#layer, this.#labels, this.#overlay);
-    // Cursors live above the world, in screen space.
-    this.app.stage.addChild(this.#grid, this.#world, this.#cursorLayer);
+    this.#world.addChild(this.#layer, this.#overlay);
+    // Cursors and reactions live above the world, in screen space.
+    this.app.stage.addChild(this.#grid, this.#world, this.#floatLayer, this.#cursorLayer);
 
     this.viewport = { x: this.app.screen.width / 2, y: this.app.screen.height / 2, zoom: 1 };
+    this.#zoomTarget = 1;
     this.app.ticker.add((ticker) => this.#frame(ticker.deltaMS));
+  }
+
+  get theme(): CanvasTheme {
+    return this.#theme;
+  }
+
+  /** Switch colors (light/dark): background, grid dots, ink. Shapes keep their fills. */
+  setTheme(theme: CanvasTheme): void {
+    if (theme === this.#theme) return;
+    this.#theme = theme;
+    this.app.renderer.background.color = theme.background;
+    const old = this.#dot;
+    this.#dot = this.#makeDot(theme);
+    if (this.#grid) this.#grid.texture = this.#dot;
+    old?.destroy(true);
+    this.#overlayDirty = true;
+    for (const node of this.#nodes.values()) {
+      node.drawn = "";
+      this.#applyLook(node);
+      this.#place(node);
+    }
+    this.#arrowsDirty = true;
+  }
+
+  #makeDot(theme: CanvasTheme): Texture {
+    return this.app.renderer.generateTexture({
+      target: new Graphics()
+        .rect(0, 0, GRID_SPACING, GRID_SPACING)
+        .fill({ color: theme.background, alpha: 0 })
+        .circle(GRID_SPACING / 2, GRID_SPACING / 2, 1.1)
+        .fill(theme.gridDot),
+      resolution: 2,
+    });
   }
 
   get screen(): { width: number; height: number } {
     return { width: this.app.screen.width, height: this.app.screen.height };
   }
 
+  /** The world rectangle currently on screen. */
+  get visibleWorld(): Rect {
+    const a = this.screenToWorld({ x: 0, y: 0 });
+    const b = this.screenToWorld({ x: this.screen.width, y: this.screen.height });
+    return { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y };
+  }
+
   screenToWorld(p: Point): Point {
     return screenToWorld(this.viewport, p);
+  }
+
+  worldToScreen(p: Point): Point {
+    return worldToScreen(this.viewport, p);
   }
 
   panBy(dx: number, dy: number): void {
@@ -159,34 +265,53 @@ export class Renderer {
     this.#zoomAnchor = anchor;
   }
 
+  /** Fly the camera so world point `p` is centered, at `zoom` (default: current). */
+  centerOn(p: Point, zoom = this.viewport.zoom, ms = 450): void {
+    const { width, height } = this.screen;
+    const z = clampZoom(zoom);
+    this.#fly({ zoom: z, x: width / 2 - p.x * z, y: height / 2 - p.y * z }, ms);
+  }
+
   /**
-   * Animate the camera so `rect` (world coordinates) fills the view, never zooming past
-   * 100%. `insetRight` keeps it clear of a panel covering the right edge.
+   * Animate the camera so `rect` (world coordinates) fills the view. `maxZoom` caps how far
+   * it zooms in; `insetRight` keeps it clear of a panel covering the right edge.
    */
-  fitTo(rect: Rect, padding = 80, insetRight = 0): void {
+  fitTo(rect: Rect, padding = 80, insetRight = 0, maxZoom = 1, ms = 650): void {
     const { height } = this.screen;
     const width = Math.max(200, this.screen.width - insetRight);
-    const zoom = clampZoom(Math.min(1, (width - padding * 2) / rect.w, (height - padding * 2) / rect.h));
-    const target: Viewport = {
-      zoom,
-      x: width / 2 - (rect.x + rect.w / 2) * zoom,
-      y: height / 2 - (rect.y + rect.h / 2) * zoom,
-    };
-    this.#flight = { from: this.viewport, to: target, elapsed: 0 };
-    this.#zoomTarget = zoom;
+    const zoom = clampZoom(Math.min(maxZoom, (width - padding * 2) / Math.max(1, rect.w), (height - padding * 2) / Math.max(1, rect.h)));
+    this.#fly({ zoom, x: width / 2 - (rect.x + rect.w / 2) * zoom, y: height / 2 - (rect.y + rect.h / 2) * zoom }, ms);
+  }
+
+  /** Follow mode: ease toward showing exactly `rect` every frame (no animation restart). */
+  follow(rect: Rect, dtMs: number): void {
+    const { width, height } = this.screen;
+    const zoom = clampZoom(Math.min(width / Math.max(1, rect.w), height / Math.max(1, rect.h)));
+    const target = { zoom, x: width / 2 - (rect.x + rect.w / 2) * zoom, y: height / 2 - (rect.y + rect.h / 2) * zoom };
+    const t = 1 - Math.exp((-8 * dtMs) / 1000);
+    const v = this.viewport;
+    this.viewport = { zoom: Math.exp(lerp(Math.log(v.zoom), Math.log(target.zoom), t)), x: lerp(v.x, target.x, t), y: lerp(v.y, target.y, t) };
+    this.#zoomTarget = this.viewport.zoom;
+    this.#flight = undefined;
+    this.#overlayDirty = true;
+  }
+
+  #fly(to: Viewport, ms: number): void {
+    this.#flight = { from: this.viewport, to, elapsed: 0, ms };
+    this.#zoomTarget = to.zoom;
   }
 
   #stepFlight(dtMs: number): void {
     const flight = this.#flight;
     if (!flight) return;
     flight.elapsed += dtMs;
-    const t = easeOutCubic(Math.min(1, flight.elapsed / 650));
+    const t = easeOutCubic(Math.min(1, flight.elapsed / flight.ms));
     const { from, to } = flight;
     // Zoom in log space; position follows so the motion reads as one camera move.
     const zoom = Math.exp(Math.log(from.zoom) + (Math.log(to.zoom) - Math.log(from.zoom)) * t);
-    this.viewport = { zoom, x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+    this.viewport = { zoom, x: lerp(from.x, to.x, t), y: lerp(from.y, to.y, t) };
     this.#overlayDirty = true;
-    if (flight.elapsed >= 650) this.#flight = undefined;
+    if (flight.elapsed >= flight.ms) this.#flight = undefined;
   }
 
   set marquee(rect: Rect | undefined) {
@@ -194,11 +319,66 @@ export class Renderer {
     this.#overlayDirty = true;
   }
 
+  set guides(guides: readonly Guide[]) {
+    if (guides.length === 0 && this.#guides.length === 0) return;
+    this.#guides = guides;
+    this.#overlayDirty = true;
+  }
+
+  set draft(draft: Draft | undefined) {
+    this.#draft = draft;
+    this.#overlayDirty = true;
+  }
+
+  /** Highlight the shape an arrow end would attach to. */
+  set attachTarget(id: NodeId | undefined) {
+    if (id === this.#attachTarget) return;
+    this.#attachTarget = id;
+    this.#overlayDirty = true;
+  }
+
+  /** Hide a label while it's being edited in the DOM (no double text). */
+  set hiddenLabel(id: NodeId | undefined) {
+    if (id === this.#hiddenLabel) return;
+    const before = this.#hiddenLabel;
+    this.#hiddenLabel = id;
+    for (const nodeId of [before, id]) {
+      const node = nodeId === undefined ? undefined : this.#nodes.get(nodeId);
+      if (node?.label) node.label.visible = node.id !== id;
+    }
+  }
+
+  set showHandles(show: boolean) {
+    if (show === this.#showHandles) return;
+    this.#showHandles = show;
+    this.#overlayDirty = true;
+  }
+
+  /** The shape as currently drawn (mid-animation geometry), for arrows that follow it. */
+  readonly lookup = (id: NodeId): ShapeView | undefined => {
+    const node = this.#nodes.get(id);
+    if (!node) return this.#scene.get(id);
+    const { x, y, w, h, rotation } = node.pose;
+    return { ...node.view, x, y, w, h, rotation };
+  };
+
+  /** Float an emoji up from a world point (reactions). */
+  spawnReaction(world: Point, emoji: string): void {
+    const start = this.worldToScreen(world);
+    const text = new Text({ text: emoji, style: { fontFamily: "Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif", fontSize: 34 } });
+    text.anchor.set(0.5);
+    text.position.set(start.x, start.y);
+    this.#floatLayer.addChild(text);
+    this.#floaters.push({ text, start, elapsed: 0, drift: (Math.random() - 0.5) * 60 });
+  }
+
   destroy(): void {
     this.frameListeners.clear();
     // Don't destroy textures wholesale: Texture.WHITE is a shared global.
     this.app.destroy({ removeView: true }, { children: true });
     this.#circle?.destroy(true);
+    this.#rounded?.destroy(true);
+    this.#soft?.destroy(true);
     this.#dot?.destroy(true);
   }
 
@@ -215,8 +395,10 @@ export class Renderer {
     this.#syncScene();
 
     if (this.#tweens.size > 0) this.#stepTweens(dtMs);
+    if (this.#arrowsDirty) this.#drawArrows();
     this.#peers.step(dtMs);
     this.#drawCursors(v);
+    if (this.#floaters.length > 0) this.#stepFloaters(dtMs);
     if (this.#peers.version !== this.#peersVersion) {
       this.#peersVersion = this.#peers.version;
       this.#overlayDirty = true; // remote selections may have changed
@@ -252,152 +434,377 @@ export class Renderer {
 
     for (const id of scene.dirty) {
       const view = scene.get(id);
-      let sprite = this.#sprites.get(id);
-      this.#syncLabel(id, view);
+      const node = this.#nodes.get(id);
       if (!view) {
-        if (!sprite) continue;
-        this.#sprites.delete(id);
+        if (!node) continue;
+        this.#nodes.delete(id);
+        this.#arrows.delete(id);
         if (animate) {
-          this.#tween(sprite, { x: sprite.x, y: sprite.y, w: sprite.width, h: sprite.height, alpha: 0 }, true);
-        } else {
-          this.#tweens.delete(sprite);
-          this.#layer.removeChild(sprite);
-          sprite.destroy();
+          this.#dying.add(node);
+          this.#tween(node, { ...node.pose, alpha: 0 }, true);
+        } else this.#dispose(node);
+        continue;
+      }
+      if (view.kind === "arrow") this.#arrows.add(id);
+      else this.#arrows.delete(id);
+      if (!node) {
+        const created = this.#create(view);
+        if (animate) {
+          created.pose.alpha = 0;
+          created.holder.alpha = 0;
+          this.#tween(created, poseOf(view), false);
         }
         continue;
       }
-      if (!sprite) {
-        sprite = new Sprite();
-        this.#sprites.set(id, sprite);
-        this.#spriteIds.set(sprite, id);
-        this.#layer.addChild(sprite);
-        this.#applyView(sprite, view);
-        if (animate) {
-          sprite.alpha = 0;
-          this.#tween(sprite, { x: view.x, y: view.y, w: view.w, h: view.h, alpha: 1 }, false);
-        }
-        continue;
-      }
-      if (animate) {
-        this.#applyLook(sprite, view);
-        this.#tween(sprite, { x: view.x, y: view.y, w: view.w, h: view.h, alpha: 1 }, false);
+      const target = poseOf(view);
+      const running = this.#tweens.get(node);
+      node.view = view;
+      this.#applyLook(node);
+      if (animate) this.#tween(node, target, false);
+      else if (running && !running.dispose && samePose(running.to, target)) {
+        // The worker confirming the geometry this node is already animating to: let the
+        // animation finish instead of snapping to the end (AI cards fly in this way).
       } else {
-        this.#applyView(sprite, view);
+        this.#tweens.delete(node);
+        node.pose = target;
+        this.#place(node);
       }
     }
     scene.dirty.clear();
     this.#overlayDirty = true;
+    this.#arrowsDirty = true;
 
     if (scene.orderDirty) {
       this.#layer.removeChildren();
       for (const id of scene.ids()) {
-        const sprite = this.#sprites.get(id);
-        if (sprite) this.#layer.addChild(sprite);
+        const node = this.#nodes.get(id);
+        if (node) this.#layer.addChild(node.holder);
       }
       // Shapes fading out of existence stay on screen (on top) until their tween ends.
-      for (const [sprite, tween] of this.#tweens) if (tween.dispose) this.#layer.addChild(sprite);
+      for (const node of this.#dying) this.#layer.addChild(node.holder);
       scene.orderDirty = false;
     }
   }
 
-  #tween(sprite: Sprite, to: Tween["to"], dispose: boolean): void {
-    this.#tweens.set(sprite, {
-      from: { x: sprite.x, y: sprite.y, w: sprite.width, h: sprite.height, alpha: sprite.alpha },
-      to,
-      elapsed: 0,
-      dispose,
-    });
+  #create(view: ShapeView): ShapeNode {
+    const holder = new Container();
+    const node: ShapeNode = {
+      id: view.id,
+      holder,
+      body: undefined,
+      bodyType: "none",
+      shadow: undefined,
+      label: undefined,
+      caption: undefined,
+      pose: poseOf(view),
+      view,
+      drawn: "",
+    };
+    this.#nodes.set(view.id, node);
+    this.#layer.addChild(holder);
+    this.#applyLook(node);
+    this.#place(node);
+    return node;
+  }
+
+  #dispose(node: ShapeNode): void {
+    this.#tweens.delete(node);
+    this.#dying.delete(node);
+    this.#layer.removeChild(node.holder);
+    node.holder.destroy({ children: true });
+  }
+
+  #tween(node: ShapeNode, to: Pose, dispose: boolean): void {
+    this.#tweens.set(node, { from: { ...node.pose }, to, elapsed: 0, dispose });
   }
 
   #stepTweens(dtMs: number): void {
-    for (const [sprite, tween] of this.#tweens) {
+    for (const [node, tween] of this.#tweens) {
       tween.elapsed += dtMs;
       const t = easeOutCubic(Math.min(1, tween.elapsed / TWEEN_MS));
       const { from, to } = tween;
-      sprite.position.set(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t);
-      sprite.setSize(from.w + (to.w - from.w) * t, from.h + (to.h - from.h) * t);
-      sprite.alpha = from.alpha + (to.alpha - from.alpha) * t;
-      this.#placeLabel(sprite);
+      node.pose = {
+        x: lerp(from.x, to.x, t),
+        y: lerp(from.y, to.y, t),
+        w: lerp(from.w, to.w, t),
+        h: lerp(from.h, to.h, t),
+        rotation: lerp(from.rotation, to.rotation, t),
+        alpha: lerp(from.alpha, to.alpha, t),
+      };
+      this.#place(node);
       if (tween.elapsed < TWEEN_MS) continue;
-      this.#tweens.delete(sprite);
-      if (tween.dispose) {
-        this.#layer.removeChild(sprite);
-        sprite.destroy();
-      }
+      this.#tweens.delete(node);
+      if (tween.dispose) this.#dispose(node);
+    }
+    this.#arrowsDirty = true;
+    this.#overlayDirty = true;
+  }
+
+  /** Which body a shape needs. Tiny rects use the plain texture (no corner artifacts). */
+  #bodyTypeFor(view: ShapeView): ShapeNode["bodyType"] {
+    switch (view.kind) {
+      case "rect":
+        return "nine";
+      case "ellipse":
+        return "circle";
+      case "text":
+        return "none";
+      default:
+        return "graphics";
     }
   }
 
-  #applyView(sprite: Sprite, view: ShapeView): void {
-    const running = this.#tweens.get(sprite);
-    const sameTarget =
-      running && !running.dispose && running.to.x === view.x && running.to.y === view.y && running.to.w === view.w && running.to.h === view.h;
-    if (sameTarget) {
-      // The worker confirming the position this sprite is already animating to: let the
-      // animation finish instead of snapping to the end (AI cards fly in this way).
-      this.#applyLook(sprite, view);
-      return;
+  /** Body type, colors and text. Geometry is applied separately by #place. */
+  #applyLook(node: ShapeNode): void {
+    const view = node.view;
+    const type = this.#bodyTypeFor(view);
+    if (type !== node.bodyType) {
+      node.body?.destroy();
+      node.body = undefined;
+      if (type === "nine" && this.#rounded) {
+        node.body = new NineSliceSprite({ texture: this.#rounded, leftWidth: 12, rightWidth: 12, topHeight: 12, bottomHeight: 12 });
+      } else if (type === "circle" && this.#circle) node.body = new Sprite(this.#circle);
+      else if (type === "graphics") node.body = new Graphics();
+      if (node.body) node.holder.addChildAt(node.body, 0);
+      node.bodyType = type;
+      node.drawn = "";
     }
-    this.#tweens.delete(sprite); // a different direct update wins over the animation
-    this.#applyLook(sprite, view);
-    sprite.alpha = 1;
-    sprite.position.set(view.x, view.y);
-    sprite.setSize(view.w, view.h);
-    this.#placeLabel(sprite);
+    const fill = displayFill(view.fill, this.#theme);
+    if (node.body && !(node.body instanceof Graphics)) node.body.tint = fill;
+
+    // Labeled cards (sticky notes, AI boards) float on a soft shadow.
+    const wantsShadow = view.kind === "rect" && view.label !== undefined;
+    if (wantsShadow && !node.shadow && this.#soft) {
+      node.shadow = new NineSliceSprite({ texture: this.#soft, leftWidth: 22, rightWidth: 22, topHeight: 22, bottomHeight: 22 });
+      node.holder.addChildAt(node.shadow, 0);
+    } else if (!wantsShadow && node.shadow) {
+      node.shadow.destroy();
+      node.shadow = undefined;
+    }
+    if (node.shadow) {
+      node.shadow.tint = this.#theme.shadow;
+      node.shadow.alpha = this.#theme.name === "dark" ? 0.55 : 0.22;
+    }
+
+    this.#syncLabel(node);
+    this.#syncCaption(node);
   }
 
-  /** Create, update or remove a shape's label. */
-  #syncLabel(id: NodeId, view: ShapeView | undefined): void {
-    let text = this.#texts.get(id);
-    if (!view?.label) {
-      if (text) {
-        this.#labels.removeChild(text);
-        text.destroy();
-        this.#texts.delete(id);
-      }
-      return;
-    }
-    const fill = labelColor(view.fill);
-    const wrap = Math.max(24, view.w - 22);
+  #syncLabel(node: ShapeNode): void {
+    const view = node.view;
+    const text = view.kind === "arrow" || view.kind === "frame" || view.kind === "path" ? undefined : view.label;
     if (!text) {
-      text = new Text({
-        text: view.label,
-        resolution: 2,
-        style: {
-          fontFamily: "Inter, Helvetica Neue, Arial, sans-serif",
-          fontSize: 15,
-          fontWeight: "600",
-          lineHeight: 19,
-          fill,
-          wordWrap: true,
-          breakWords: true,
-          wordWrapWidth: wrap,
-        },
-      });
-      this.#texts.set(id, text);
-      this.#labels.addChild(text);
-    } else {
-      if (text.text !== view.label) text.text = view.label;
-      if (text.style.fill !== fill) text.style.fill = fill;
-      if (text.style.wordWrapWidth !== wrap) text.style.wordWrapWidth = wrap;
+      node.label?.destroy();
+      node.label = undefined;
+      return;
     }
-    const sprite = this.#sprites.get(id);
-    text.position.set((sprite?.x ?? view.x) + 11, (sprite?.y ?? view.y) + 10);
+    const big = view.kind === "text";
+    const comment = view.kind === "comment";
+    const fill = big || comment ? this.#theme.ink : view.kind === "diamond" ? labelColor(displayFill(view.fill, this.#theme)) : labelColor(displayFill(view.fill, this.#theme));
+    const wrap = comment ? 220 : Math.max(24, view.w - 22);
+    const style = {
+      fontFamily: FONT,
+      fontSize: big ? 24 : comment ? 14 : 15,
+      fontWeight: big ? ("700" as const) : ("600" as const),
+      lineHeight: big ? 30 : comment ? 19 : 19,
+      fill,
+      wordWrap: true,
+      breakWords: true,
+      wordWrapWidth: wrap,
+      align: view.kind === "ellipse" || view.kind === "diamond" ? ("center" as const) : ("left" as const),
+    };
+    if (!node.label) {
+      node.label = new Text({ text, resolution: 2, style });
+      node.holder.addChild(node.label);
+    } else {
+      if (node.label.text !== text) node.label.text = text;
+      Object.assign(node.label.style, style);
+    }
+    node.label.visible = node.id !== this.#hiddenLabel;
   }
 
-  /** Keep a label glued to its (possibly animating) sprite. */
-  #placeLabel(sprite: Sprite): void {
-    const id = this.#spriteIds.get(sprite);
-    const text = id === undefined ? undefined : this.#texts.get(id);
-    if (!text) return;
-    text.position.set(sprite.x + 11, sprite.y + 10);
-    text.alpha = sprite.alpha;
+  /** Frame titles and comment authors. */
+  #syncCaption(node: ShapeNode): void {
+    const view = node.view;
+    const text = view.kind === "frame" ? (view.label ?? "Frame") : view.kind === "comment" ? (view.author ?? "") : "";
+    if (!text) {
+      node.caption?.destroy();
+      node.caption = undefined;
+      return;
+    }
+    const style =
+      view.kind === "frame"
+        ? { fontFamily: FONT, fontSize: 14, fontWeight: "700" as const, fill: this.#theme.muted }
+        : { fontFamily: FONT, fontSize: 11, fontWeight: "700" as const, fill: this.#theme.muted };
+    if (!node.caption) {
+      node.caption = new Text({ text, resolution: 2, style });
+      node.holder.addChild(node.caption);
+    } else {
+      if (node.caption.text !== text) node.caption.text = text;
+      Object.assign(node.caption.style, style);
+    }
   }
 
-  /** Texture and color only (geometry may be animated separately). */
-  #applyLook(sprite: Sprite, view: ShapeView): void {
-    const texture = view.kind === "ellipse" && this.#circle ? this.#circle : Texture.WHITE;
-    if (sprite.texture !== texture) sprite.texture = texture;
-    sprite.tint = view.fill;
+  /** Position, size and rotate a node from its pose; redraw vector bodies if needed. */
+  #place(node: ShapeNode): void {
+    const { x, y, w, h, rotation, alpha } = node.pose;
+    const view = node.view;
+    const holder = node.holder;
+    holder.alpha = alpha;
+    if (view.kind === "arrow") {
+      holder.position.set(0, 0);
+      holder.rotation = 0;
+      this.#arrowsDirty = true;
+      return;
+    }
+    holder.position.set(x + w / 2, y + h / 2);
+    holder.rotation = rotation;
+    const left = -w / 2;
+    const top = -h / 2;
+    const body = node.body;
+    if (body instanceof Graphics) this.#drawVector(node, body, w, h);
+    else if (body) {
+      body.position.set(left, top);
+      body.setSize(w, h);
+    }
+    if (node.shadow) {
+      node.shadow.position.set(left - 8, top - 3);
+      node.shadow.setSize(w + 16, h + 18);
+    }
+    const label = node.label;
+    if (label) {
+      if (view.kind === "comment") label.position.set(left + 44, top + 22);
+      else if (view.kind === "ellipse" || view.kind === "diamond") {
+        label.style.wordWrapWidth = Math.max(24, (view.kind === "diamond" ? w * 0.6 : w * 0.72) - 8);
+        label.position.set(-label.width / 2, -label.height / 2);
+      } else {
+        if (label.style.wordWrapWidth !== Math.max(24, w - 22)) label.style.wordWrapWidth = Math.max(24, w - 22);
+        label.position.set(left + (view.kind === "text" ? 2 : 11), top + (view.kind === "text" ? 2 : 10));
+      }
+    }
+    const caption = node.caption;
+    if (caption) {
+      if (view.kind === "frame") caption.position.set(left + 2, top - FRAME_TITLE_H + 6);
+      else caption.position.set(left + 44, top + 4);
+    }
+  }
+
+  /** Draw diamonds, frames, pen strokes and comments in the holder's local frame. */
+  #drawVector(node: ShapeNode, g: Graphics, w: number, h: number): void {
+    const view = node.view;
+    const key = `${view.kind}|${w.toFixed(1)}|${h.toFixed(1)}|${view.fill}|${view.points?.length ?? 0}|${view.label ?? ""}|${this.#theme.name}`;
+    if (key === node.drawn) return;
+    node.drawn = key;
+    g.clear();
+    const left = -w / 2;
+    const top = -h / 2;
+    const fill = displayFill(view.fill, this.#theme);
+    switch (view.kind) {
+      case "diamond":
+        g.poly([0, top, w / 2, 0, 0, h / 2, left, 0]).fill(fill);
+        return;
+      case "frame":
+        g.roundRect(left, top, w, h, 14)
+          .fill({ color: fill, alpha: this.#theme.name === "dark" ? 0.16 : 0.12 })
+          .stroke({ width: 1.5, color: fill, alpha: 0.55 });
+        return;
+      case "path": {
+        const pts = parsePath(view.points, w, h);
+        const color = inkColor(view.fill, this.#theme);
+        if (pts.length === 1 && pts[0]) g.circle(pts[0].x, pts[0].y, 2.2).fill(color);
+        else if (pts.length > 1) {
+          const [first, ...rest] = pts;
+          if (!first) return;
+          g.moveTo(first.x, first.y);
+          for (const p of rest) g.lineTo(p.x, p.y);
+          g.stroke({ width: 3.5, color, cap: "round", join: "round" });
+        }
+        return;
+      }
+      case "comment": {
+        // A pin (initial inside) and, when there's text, a card beside it.
+        g.circle(left + 16, top + 16, 15).fill(fill).stroke({ width: 2.5, color: 0xffffff });
+        g.moveTo(left + 5, top + 26).lineTo(left + 1, top + 33).lineTo(left + 12, top + 30).fill(fill);
+        if (view.label) {
+          const label = node.label;
+          const cw = Math.max(140, (label?.width ?? 120) + 26);
+          const ch = (label?.height ?? 18) + 34;
+          g.roundRect(left + 34, top - 2, cw, ch, 12)
+            .fill(this.#theme.paper)
+            .stroke({ width: 1, color: this.#theme.line });
+        }
+        return;
+      }
+      default:
+        g.rect(left, top, w, h).fill(fill);
+    }
+  }
+
+  /** Arrows follow the shapes they're attached to (including mid-animation). */
+  #drawArrows(): void {
+    this.#arrowsDirty = false;
+    for (const id of this.#arrows) {
+      const node = this.#nodes.get(id);
+      if (!node || !(node.body instanceof Graphics)) continue;
+      const g = node.body;
+      const view = this.lookup(id);
+      if (!view) continue;
+      const { a, b } = arrowEnds(view, this.lookup);
+      g.clear();
+      const color = inkColor(view.fill, this.#theme);
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
+      const head = 13;
+      const tail = { x: b.x - Math.cos(angle) * head * 0.8, y: b.y - Math.sin(angle) * head * 0.8 };
+      g.moveTo(a.x, a.y).lineTo(tail.x, tail.y).stroke({ width: 2.5, color, cap: "round" });
+      g.poly([
+        b.x,
+        b.y,
+        b.x - Math.cos(angle - 0.42) * head,
+        b.y - Math.sin(angle - 0.42) * head,
+        b.x - Math.cos(angle + 0.42) * head,
+        b.y - Math.sin(angle + 0.42) * head,
+      ]).fill(color);
+      this.#placeArrowLabel(node, a, b);
+    }
+  }
+
+  #placeArrowLabel(node: ShapeNode, a: Point, b: Point): void {
+    const text = node.view.label;
+    if (!text) {
+      node.label?.destroy();
+      node.label = undefined;
+      return;
+    }
+    const style = { fontFamily: FONT, fontSize: 13, fontWeight: "600" as const, fill: this.#theme.ink };
+    if (!node.label) {
+      node.label = new Text({ text, resolution: 2, style });
+      node.holder.addChild(node.label);
+    } else if (node.label.text !== text) node.label.text = text;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const g = node.body;
+    if (g instanceof Graphics) {
+      g.roundRect(mid.x - node.label.width / 2 - 8, mid.y - node.label.height / 2 - 4, node.label.width + 16, node.label.height + 8, 10)
+        .fill(this.#theme.paper)
+        .stroke({ width: 1, color: this.#theme.line });
+    }
+    node.label.position.set(mid.x - node.label.width / 2, mid.y - node.label.height / 2);
+  }
+
+  #stepFloaters(dtMs: number): void {
+    for (let i = this.#floaters.length - 1; i >= 0; i--) {
+      const f = this.#floaters[i];
+      if (!f) continue;
+      f.elapsed += dtMs;
+      const t = Math.min(1, f.elapsed / FLOAT_MS);
+      const rise = easeOutCubic(t);
+      f.text.position.set(f.start.x + f.drift * rise + Math.sin(t * 9) * 6, f.start.y - 120 * rise);
+      f.text.scale.set(t < 0.15 ? 0.4 + (t / 0.15) * 0.8 : 1.2 - t * 0.2);
+      f.text.alpha = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
+      if (t >= 1) {
+        f.text.destroy();
+        this.#floaters.splice(i, 1);
+      }
+    }
   }
 
   #drawCursors(v: Viewport): void {
@@ -408,6 +815,13 @@ export class Renderer {
       const view = this.#cursorFor(peer);
       const screen = worldToScreen(v, peer.shown);
       view.root.position.set(screen.x, screen.y);
+      const chat = peer.presence.chat ?? "";
+      if (chat !== view.chatText) {
+        view.chat?.destroy({ children: true });
+        view.chat = chat ? buildChat(chat, view.color) : undefined;
+        if (view.chat) view.root.addChild(view.chat);
+        view.chatText = chat;
+      }
     }
     for (const [id, view] of this.#cursors) {
       if (live.has(id)) continue;
@@ -426,17 +840,26 @@ export class Renderer {
     return view;
   }
 
+  #outline(g: Graphics, s: ShapeView): void {
+    if (s.kind === "arrow") {
+      const { a, b } = arrowEnds(s, this.lookup);
+      g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+      return;
+    }
+    const pts = corners(s);
+    g.poly(pts.flatMap((p) => [p.x, p.y]));
+  }
+
   /** Other people's selections, outlined in their color. */
   #drawRemoteSelections(g: Graphics): void {
     const width = 2 / this.viewport.zoom;
     for (const peer of this.#peers.list()) {
       let any = false;
       for (const id of peer.presence.selection.slice(0, MAX_OUTLINES)) {
-        const s = this.#scene.get(id);
+        const s = this.lookup(id);
         if (!s) continue;
         any = true;
-        if (s.kind === "ellipse") g.ellipse(s.x + s.w / 2, s.y + s.h / 2, s.w / 2, s.h / 2);
-        else g.rect(s.x, s.y, s.w, s.h);
+        this.#outline(g, s);
       }
       if (any) g.stroke({ width, color: peer.presence.color, alpha: 0.9 });
     }
@@ -445,28 +868,102 @@ export class Renderer {
   #drawOverlay(selection: ReadonlySet<NodeId>): void {
     this.#overlayDirty = false;
     const g = this.#overlay;
+    const zoom = this.viewport.zoom;
+    const theme = this.#theme;
     g.clear();
     this.#drawRemoteSelections(g);
-    const stroke = { width: 1.5 / this.viewport.zoom, color: SELECTION };
+    const stroke = { width: 1.5 / zoom, color: theme.selection };
+
+    const target = this.#attachTarget === undefined ? undefined : this.lookup(this.#attachTarget);
+    if (target) {
+      this.#outline(g, target);
+      g.stroke({ width: 3 / zoom, color: theme.selection, alpha: 0.5 });
+    }
 
     const selected: ShapeView[] = [];
     for (const id of selection) {
-      const view = this.#scene.get(id);
+      const view = this.lookup(id);
       if (view) selected.push(view);
     }
     if (selected.length > 0 && selected.length <= MAX_OUTLINES) {
-      for (const s of selected) {
-        if (s.kind === "ellipse") g.ellipse(s.x + s.w / 2, s.y + s.h / 2, s.w / 2, s.h / 2);
-        else g.rect(s.x, s.y, s.w, s.h);
-      }
+      for (const s of selected) this.#outline(g, s);
       g.stroke(stroke);
     }
-    const bounds = selected.length > 1 ? boundsOf(selected) : undefined;
-    if (bounds) {
-      const pad = 4 / this.viewport.zoom;
-      g.rect(bounds.x - pad, bounds.y - pad, bounds.w + pad * 2, bounds.h + pad * 2).stroke({ ...stroke, alpha: 0.5 });
+
+    if (this.#showHandles && selected.length > 0) {
+      const size = 9 / zoom;
+      const knob = (p: Point, round = false): void => {
+        if (round) g.circle(p.x, p.y, size / 1.6);
+        else g.roundRect(p.x - size / 2, p.y - size / 2, size, size, 2 / zoom);
+        g.fill(0xffffff).stroke({ width: 1.5 / zoom, color: theme.selection });
+      };
+      const only = selected.length === 1 ? selected[0] : undefined;
+      if (only?.kind === "arrow") {
+        const { a, b } = arrowEnds(only, this.lookup);
+        knob(a, true);
+        knob(b, true);
+      } else if (only) {
+        const handles = handlePositions(only, only.rotation ?? 0, zoom);
+        const top = handles.find((h) => h.id === "n");
+        const rot = handles.find((h) => h.id === "rotate");
+        if (top && rot && only.kind !== "comment") {
+          g.moveTo(top.p.x, top.p.y).lineTo(rot.p.x, rot.p.y).stroke(stroke);
+        }
+        for (const h of handles) {
+          if (only.kind === "comment") continue;
+          if (h.id === "rotate") knob(h.p, true);
+          else knob(h.p);
+        }
+      } else {
+        const bounds = boundsOf(selected.map((s) => visualBounds(s, this.lookup)));
+        if (bounds) {
+          const pad = 4 / zoom;
+          g.rect(bounds.x - pad, bounds.y - pad, bounds.w + pad * 2, bounds.h + pad * 2).stroke({ ...stroke, alpha: 0.6 });
+          for (const h of handlePositions(bounds, 0, zoom)) if (h.id !== "rotate") knob(h.p);
+        }
+      }
     }
+
+    for (const guide of this.#guides) {
+      g.moveTo(guide.x1, guide.y1).lineTo(guide.x2, guide.y2);
+    }
+    if (this.#guides.length > 0) g.stroke({ width: 1 / zoom, color: theme.guide });
+
+    const draft = this.#draft;
+    if (draft?.kind === "box") {
+      const r = draft.rect;
+      if (draft.shape === "ellipse") g.ellipse(r.x + r.w / 2, r.y + r.h / 2, r.w / 2, r.h / 2);
+      else if (draft.shape === "diamond") g.poly([r.x + r.w / 2, r.y, r.x + r.w, r.y + r.h / 2, r.x + r.w / 2, r.y + r.h, r.x, r.y + r.h / 2]);
+      else g.roundRect(r.x, r.y, r.w, r.h, 8 / zoom);
+      g.fill({ color: theme.selection, alpha: 0.08 }).stroke({ ...stroke, alpha: 0.9 });
+    } else if (draft?.kind === "arrow") {
+      g.moveTo(draft.a.x, draft.a.y).lineTo(draft.b.x, draft.b.y).stroke({ width: 2.5, color: theme.selection, cap: "round" });
+      g.circle(draft.b.x, draft.b.y, 4 / zoom).fill(theme.selection);
+    } else if (draft?.kind === "path" && draft.points.length > 1) {
+      const [first, ...rest] = draft.points;
+      if (first) {
+        g.moveTo(first.x, first.y);
+        for (const p of rest) g.lineTo(p.x, p.y);
+        g.stroke({ width: 3.5, color: inkColor(draft.color, theme), cap: "round", join: "round" });
+      }
+    }
+
     const m = this.#marquee;
-    if (m) g.rect(m.x, m.y, m.w, m.h).fill({ color: SELECTION, alpha: 0.08 }).stroke(stroke);
+    if (m) g.rect(m.x, m.y, m.w, m.h).fill({ color: theme.selection, alpha: 0.08 }).stroke(stroke);
   }
+}
+
+const samePose = (a: Pose, b: Pose): boolean => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h && a.rotation === b.rotation;
+
+/** Pen points in the holder's local frame (centered on the box). */
+function parsePath(points: string | undefined, w: number, h: number): Point[] {
+  if (!points) return [];
+  const out: Point[] = [];
+  for (const pair of points.split(" ")) {
+    const comma = pair.indexOf(",");
+    const x = Number(pair.slice(0, comma));
+    const y = Number(pair.slice(comma + 1));
+    if (comma > 0 && Number.isFinite(x) && Number.isFinite(y)) out.push({ x: (x - 0.5) * w, y: (y - 0.5) * h });
+  }
+  return out;
 }

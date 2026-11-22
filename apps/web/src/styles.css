@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* The `dark:` variant follows the resolved theme on <html data-theme>, which honours the
+   system setting unless the user picked light/dark explicitly (see canvas/theme.ts). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
   --color-canvas: #f3f0e8;
   --color-paper: #fbfaf6;
@@ -10,23 +14,80 @@
   --color-good: #1e8f5a;
   --color-warn: #c98a12;
   --color-bad: #c6513c;
+  /* Semantic surfaces, so components never hard-code black/white: */
+  --color-hover: #ebe7de; /* hover / subtle wash */
+  --color-edge: rgb(17 19 24 / 0.1); /* panel borders */
+  --color-field: #ffffff; /* inputs, keycaps */
   --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
   --font-mono: "JetBrains Mono", SFMono-Regular, Consolas, monospace;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #111317;
+  --color-paper: #1b1e24;
+  --color-ink: #eceae4;
+  --color-muted: #9a9ea6;
+  --color-line: #33373f;
+  --color-accent: #6b8dff;
+  --color-good: #3fb27f;
+  --color-warn: #e0a83a;
+  --color-bad: #e27561;
+  --color-hover: #262a31;
+  --color-edge: rgb(255 255 255 / 0.1);
+  --color-field: #14161a;
+}
+
 html,
-body,
-#root {
-  height: 100%;
+body {
   margin: 0;
-  overflow: hidden;
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.25s ease;
+}
+
+#root {
+  min-height: 100%;
+}
+
+/* The board is a full-screen app; the homepage and dashboard scroll like websites. */
+html[data-page="board"],
+html[data-page="board"] body,
+html[data-page="board"] #root {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 canvas {
   display: block;
   outline: none;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+/* A quiet scrollbar for panels. */
+.scroll-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

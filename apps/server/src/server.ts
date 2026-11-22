@@ -12,7 +12,7 @@ import {
   type ClientMessage,
   type ServerMessage,
 } from "@canvas/sync";
-import { verifyToken, type Role } from "./auth.js";
+import { signToken, verifyToken, type Role } from "./auth.js";
 import type { Bus, BusMessage } from "./bus.js";
 import { TokenBucket } from "./rate-limit.js";
 import { Room, type RoomClient } from "./room.js";
@@ -161,8 +161,53 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
       );
       return;
     }
+    if (req.url === "/share") {
+      handleShare(req, res);
+      return;
+    }
     res.writeHead(404).end();
   });
+
+  /**
+   * POST /share {docId, token, role} → a fresh token for that document and role.
+   * Only an EDITOR of the document may mint links, and a share link never grants more
+   * than the caller has. Without AUTH_SECRET the server is open, so links need no token.
+   */
+  function handleShare(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): void {
+    const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type", "access-control-allow-methods": "POST" };
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, cors).end();
+      return;
+    }
+    const reply = (status: number, body: unknown): void => {
+      res.writeHead(status, { ...cors, "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    if (req.method !== "POST") return reply(405, { error: "POST only" });
+    let raw = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk: string) => {
+      raw += chunk;
+      if (raw.length > 4_096) req.destroy();
+    });
+    req.on("end", () => {
+      let body: { docId?: unknown; token?: unknown; role?: unknown };
+      try {
+        body = JSON.parse(raw) as typeof body;
+      } catch {
+        return reply(400, { error: "bad JSON" });
+      }
+      const { docId, token, role } = body;
+      if (typeof docId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(docId)) return reply(400, { error: "bad docId" });
+      if (role !== "viewer" && role !== "editor") return reply(400, { error: "role must be viewer or editor" });
+      if (!authSecret) return reply(200, { auth: false });
+      const claims = typeof token === "string" ? verifyToken(authSecret, token, docId, now()) : "missing token";
+      if (typeof claims === "string") return reply(403, { error: claims });
+      if (claims.role !== "editor") return reply(403, { error: "only editors can share" });
+      const exp = Math.min(claims.exp, Math.floor(now() / 1000) + 30 * 24 * 3600);
+      reply(200, { auth: true, token: signToken(authSecret, { doc: docId, sub: `${claims.sub}/share`, role, exp }) });
+    });
+  }
   const wss = new WebSocketServer({ server: http, maxPayload: options.maxPayloadBytes ?? 16 * 1024 * 1024 });
 
   // --- rooms + bus ---------------------------------------------------------
@@ -248,7 +293,7 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
         }
       }
       room.clients.add(conn);
-      conn.send({ type: "welcome", head: room.delivered });
+      conn.send({ type: "welcome", head: room.delivered, readOnly: conn.role === "viewer" });
       // Who's already here, on this instance and on others.
       for (const other of room.clients) {
         if (other !== conn && other.presence) conn.send({ type: "presence", clientId: other.clientId, payload: other.presence });

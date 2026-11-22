@@ -26,6 +26,9 @@ export type EditCommand =
     }
   | { readonly type: "delete"; readonly seq: number; readonly ids: readonly NodeId[]; readonly group?: number }
   | { readonly type: "front"; readonly seq: number; readonly ids: readonly NodeId[]; readonly group?: number }
+  | { readonly type: "back"; readonly seq: number; readonly ids: readonly NodeId[]; readonly group?: number }
+  /** Rename the board (synced, last writer wins; not an undo step). */
+  | { readonly type: "title"; readonly seq: number; readonly title: string }
   | { readonly type: "undo"; readonly seq: number }
   | { readonly type: "redo"; readonly seq: number }
   /** Make the live document match the version at server seq `at`. */
@@ -65,6 +68,7 @@ export interface SyncEvent {
   readonly status: SyncStatus;
   readonly pending: number;
   readonly cursor: number;
+  readonly readOnly: boolean;
   readonly error?: string;
 }
 
@@ -97,4 +101,10 @@ export type HistoryEvent =
   | { readonly type: "history"; readonly requestId: number; readonly at: number; readonly head: number; readonly shapes: readonly ShapeView[] }
   | { readonly type: "historyError"; readonly requestId: number; readonly message: string };
 
-export type EngineEvent = PatchEvent | ErrorEvent | SyncEvent | RestoredEvent | PresenceEvent | UndoStateEvent | HistoryEvent;
+/** The board's (synced) name changed, or was read when the document opened. */
+export interface TitleEvent {
+  readonly type: "title";
+  readonly title: string | undefined;
+}
+
+export type EngineEvent = TitleEvent | PatchEvent | ErrorEvent | SyncEvent | RestoredEvent | PresenceEvent | UndoStateEvent | HistoryEvent;

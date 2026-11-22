@@ -16,7 +16,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "eval": "tsx --conditions=source eval/run-eval.ts"
+    "eval": "tsx --conditions=source eval/run-eval.ts",
+    "eval:diagram": "tsx --conditions=source eval/diagram-eval.ts"
   },
   "devDependencies": {
     "fast-check": "^4.1.0",

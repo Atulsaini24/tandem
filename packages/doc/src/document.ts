@@ -29,8 +29,8 @@ import {
  * It also keeps this replica's undo/redo history (see "Selective undo" below).
  */
 
-export type ShapeKind = "rect" | "ellipse";
-export const SHAPE_KINDS: readonly ShapeKind[] = ["rect", "ellipse"];
+export type ShapeKind = "rect" | "ellipse" | "diamond" | "text" | "frame" | "arrow" | "path" | "comment";
+export const SHAPE_KINDS: readonly ShapeKind[] = ["rect", "ellipse", "diamond", "text", "frame", "arrow", "path", "comment"];
 
 export interface ShapeProps {
   readonly kind: ShapeKind;
@@ -42,6 +42,18 @@ export interface ShapeProps {
   readonly fill: number;
   /** Text shown on the shape (sticky notes, AI boards). Last writer wins. */
   readonly label?: string;
+  /** Rotation around the shape's center, radians. */
+  readonly rotation?: number;
+  /**
+   * Arrows and pen strokes: points normalized to the box (0..1 of w and h), as
+   * "x,y x,y …". Normalized, so moving and resizing the box move and scale the line.
+   */
+  readonly points?: string;
+  /** Arrows: ids of the shapes each end is attached to (they follow those shapes). */
+  readonly from?: string;
+  readonly to?: string;
+  /** Comments: who wrote it. */
+  readonly author?: string;
 }
 
 export interface ShapeView extends ShapeProps {
@@ -73,8 +85,17 @@ export interface UndoResult {
   readonly skipped: number;
 }
 
-const PROP_KEYS = ["kind", "x", "y", "w", "h", "fill", "label"] as const satisfies ReadonlyArray<keyof ShapeProps>;
+const PROP_KEYS = ["kind", "x", "y", "w", "h", "fill", "label", "rotation", "points", "from", "to", "author"] as const satisfies ReadonlyArray<keyof ShapeProps>;
+/** Optional props, and the value that means "absent" (written to clear them on restore). */
+const OPTIONAL_KEYS = { label: "", rotation: 0, points: "", from: "", to: "", author: "" } as const;
+type OptionalKey = keyof typeof OPTIONAL_KEYS;
+const isOptional = (key: string): key is OptionalKey => key in OPTIONAL_KEYS;
 export const MAX_LABEL_CHARS = 500;
+export const MAX_POINTS_CHARS = 40_000;
+const MAX_REF_CHARS = 80;
+/** Id of the hidden property map holding document metadata (title). Never a shape. */
+export const META_ID = "__meta__";
+export const MAX_TITLE_CHARS = 120;
 const MAX_UNDO = 200;
 
 /** Every shape id a delta touches: its structure, its properties, or both. */
@@ -108,6 +129,33 @@ export function validatePatch(patch: Partial<ShapeProps>): void {
   if (label !== undefined && (typeof label !== "string" || Array.from(label).length > MAX_LABEL_CHARS)) {
     throw new RangeError(`label must be a string of at most ${MAX_LABEL_CHARS} characters`);
   }
+  if (patch.rotation !== undefined && !Number.isFinite(patch.rotation)) throw new RangeError("rotation must be finite");
+  if (patch.points !== undefined && (typeof patch.points !== "string" || patch.points.length > MAX_POINTS_CHARS)) {
+    throw new RangeError(`points must be a string of at most ${MAX_POINTS_CHARS} characters`);
+  }
+  for (const key of ["from", "to", "author"] as const) {
+    const value = patch[key];
+    if (value !== undefined && (typeof value !== "string" || value.length > MAX_REF_CHARS)) {
+      throw new RangeError(`${key} must be a string of at most ${MAX_REF_CHARS} characters`);
+    }
+  }
+}
+
+/** Parse a `points` string ("x,y x,y"). Malformed pairs are dropped. */
+export function parsePoints(points: string | undefined): Array<{ x: number; y: number }> {
+  if (!points) return [];
+  const out: Array<{ x: number; y: number }> = [];
+  for (const pair of points.split(" ")) {
+    const [a, b] = pair.split(",");
+    const x = Number(a);
+    const y = Number(b);
+    if (a !== undefined && b !== undefined && Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });
+  }
+  return out;
+}
+
+export function formatPoints(points: ReadonlyArray<{ x: number; y: number }>): string {
+  return points.map((p) => `${Math.round(p.x * 10_000) / 10_000},${Math.round(p.y * 10_000) / 10_000}`).join(" ");
 }
 
 /**
@@ -117,11 +165,15 @@ export function validatePatch(patch: Partial<ShapeProps>): void {
 function readShape(id: NodeId, props: LWWMap<PropValue>): ShapeView | undefined {
   const kind = props.get("kind");
   const [x, y, w, h, fill] = (["x", "y", "w", "h", "fill"] as const).map((key) => props.get(key));
-  if (kind !== "rect" && kind !== "ellipse") return undefined;
+  if (typeof kind !== "string" || !(SHAPE_KINDS as readonly string[]).includes(kind)) return undefined;
   if (typeof x !== "number" || typeof y !== "number") return undefined;
   if (typeof w !== "number" || typeof h !== "number" || typeof fill !== "number") return undefined;
-  const label = props.get("label");
-  return typeof label === "string" && label.length > 0 ? { id, kind, x, y, w, h, fill, label } : { id, kind, x, y, w, h, fill };
+  const view: Record<string, PropValue> = { id, kind, x, y, w, h, fill };
+  for (const [key, empty] of Object.entries(OPTIONAL_KEYS)) {
+    const value = props.get(key);
+    if (value !== undefined && value !== empty && typeof value === typeof empty) view[key] = value;
+  }
+  return view as unknown as ShapeView;
 }
 
 // --- Selective undo ----------------------------------------------------------
@@ -186,6 +238,20 @@ export class CanvasDocument {
       tree: this.#tree.ops,
       props: [...this.#props].map(([id, map]) => [id, map.state] as const),
     };
+  }
+
+  /**
+   * The board's name. Stored in a property map that is never attached to the tree, so it
+   * syncs like any property (last writer wins) but is never drawn as a shape.
+   */
+  get title(): string | undefined {
+    const title = this.#props.get(META_ID)?.get("title");
+    return typeof title === "string" && title.length > 0 ? title : undefined;
+  }
+
+  setTitle(title: string): DocDelta {
+    const clean = Array.from(title.replace(/\s+/g, " ").trim()).slice(0, MAX_TITLE_CHARS).join("");
+    return { tree: [], props: [[META_ID, this.#propsOf(META_ID).set("title", clean)]] };
   }
 
   /** Only the ops a given replica authored (for re-seeding a server that lost data). */
@@ -270,6 +336,24 @@ export class CanvasDocument {
     return { tree, props: [] };
   }
 
+  /** Move shapes below everything else (frames go behind their contents), keeping their order. */
+  sendToBack(ids: Iterable<NodeId>, options?: EditOptions): DocDelta {
+    const wanted = new Set(ids);
+    const children = this.#tree.children(ROOT);
+    const ordered = children.filter((id) => wanted.has(id));
+    const first = children.find((id) => !wanted.has(id));
+    const firstPosition = first === undefined ? null : (this.#tree.get(first)?.position ?? null);
+    const positions = positionsBetween(null, firstPosition, ordered.length);
+    const changes: ChangeSet = { props: [], tree: [] };
+    const tree: MoveOp[] = [];
+    ordered.forEach((id, i) => {
+      const position = positions[i];
+      if (position !== undefined) tree.push(...this.#move(id, ROOT, position, changes));
+    });
+    this.#record(changes, options);
+    return { tree, props: [] };
+  }
+
   /**
    * Make the document look like `version` (e.g. a point in history): restore shapes that
    * were deleted since, revert changed properties, remove shapes added since, and restore
@@ -296,9 +380,10 @@ export class CanvasDocument {
       const live = current.get(id);
       const patch: Partial<Record<keyof ShapeProps, PropValue>> = {};
       for (const key of PROP_KEYS) {
-        // A label that didn't exist in the version is cleared (empty = no label).
-        const wanted = key === "label" ? (target.label ?? "") : target[key];
-        const current = key === "label" ? (live?.label ?? "") : live?.[key];
+        // An optional prop that didn't exist in the version is cleared (written as "empty").
+        const wanted = isOptional(key) ? (target[key] ?? OPTIONAL_KEYS[key]) : target[key];
+        const current = isOptional(key) ? (live?.[key] ?? OPTIONAL_KEYS[key]) : live?.[key];
+        if (wanted === undefined) continue;
         if (live === undefined || current !== wanted) patch[key] = wanted;
       }
       if (Object.keys(patch).length > 0) props.push([id, this.#write(id, patch as Partial<ShapeProps>, changes)]);

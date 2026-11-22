@@ -1,12 +1,15 @@
 import { create } from "zustand";
 import type { NodeId } from "@canvas/doc";
 import type { SyncStatus } from "@canvas/sync";
+import { applyTheme, loadPreference, resolveTheme, savePreference, type Theme, type ThemePreference } from "../canvas/theme";
 
-export type Tool = "select" | "rect" | "ellipse" | "note";
+export type Tool = "select" | "hand" | "rect" | "ellipse" | "diamond" | "text" | "note" | "arrow" | "pen" | "frame" | "comment";
 
 export interface AiUiState {
   readonly status: "idle" | "thinking" | "writing" | "done" | "error" | "cancelled";
-  readonly mode?: "generate" | "organize";
+  readonly mode?: "generate" | "organize" | "diagram" | "insight";
+  /** Insight mode: the summary, shown in the panel too. */
+  readonly summary?: string;
   /** Cards placed so far in this run. */
   readonly items: number;
   readonly startedAt?: number;
@@ -47,6 +50,8 @@ export interface SyncUiState {
   readonly error?: string;
   /** What the user asked for with the online/offline toggle. */
   readonly wantOnline: boolean;
+  /** Signed in with a viewer token: everything is visible, nothing is editable. */
+  readonly readOnly: boolean;
   readonly docId: string;
 }
 
@@ -68,6 +73,26 @@ export interface Person {
 
 interface UiState {
   readonly tool: Tool;
+  /** The board's synced name. */
+  readonly title: string | undefined;
+  /** Opened from a view-only share link: editing is off in this tab. */
+  readonly viewMode: boolean;
+  /** The person whose view we're following (their pan and zoom drive ours). */
+  readonly following: string | undefined;
+  readonly paletteOpen: boolean;
+  /** Cursor chat: what you're typing next to your cursor (undefined = closed). */
+  readonly chat: string | undefined;
+  /** Fill for new shapes (the style bar's last pick). */
+  readonly fill: number;
+  /** Keys typed after "start editing" but before the text box appeared (not lost). */
+  readonly editBuffer: string;
+  setEditBuffer(editBuffer: string): void;
+  setTitle(title: string | undefined): void;
+  setViewMode(viewMode: boolean): void;
+  setFollowing(clientId: string | undefined): void;
+  setPaletteOpen(open: boolean): void;
+  setChat(chat: string | undefined): void;
+  setFill(fill: number): void;
   readonly selection: ReadonlySet<NodeId>;
   readonly stats: Stats;
   readonly bench: BenchResult | "running" | undefined;
@@ -84,6 +109,9 @@ interface UiState {
   readonly editing: NodeId | undefined;
   readonly ai: AiUiState;
   readonly aiOpen: boolean;
+  readonly themePreference: ThemePreference;
+  readonly theme: Theme;
+  setTheme(preference: ThemePreference): void;
   setEditing(id: NodeId | undefined): void;
   setAi(ai: Partial<AiUiState> & Pick<AiUiState, "status">): void;
   setAiOpen(open: boolean): void;
@@ -106,10 +134,24 @@ interface UiState {
  */
 export const useUiStore = create<UiState>()((set) => ({
   tool: "select",
+  title: undefined,
+  viewMode: false,
+  following: undefined,
+  paletteOpen: false,
+  chat: undefined,
+  fill: 0x2f63ff,
+  editBuffer: "",
+  setEditBuffer: (editBuffer) => set({ editBuffer }),
+  setTitle: (title) => set({ title }),
+  setViewMode: (viewMode) => set({ viewMode }),
+  setFollowing: (following) => set({ following }),
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  setChat: (chat) => set({ chat }),
+  setFill: (fill) => set({ fill }),
   selection: new Set(),
   stats: { fps: 0, p95: 0, shapes: 0, zoom: 1, engineMs: 0 },
   bench: undefined,
-  sync: { status: "offline", pending: 0, wantOnline: true, docId: "default" },
+  sync: { status: "offline", pending: 0, wantOnline: true, docId: "default", readOnly: false },
   peers: [],
   me: undefined,
   notice: undefined,
@@ -119,7 +161,15 @@ export const useUiStore = create<UiState>()((set) => ({
   editing: undefined,
   ai: { status: "idle", items: 0 },
   aiOpen: false,
-  setEditing: (editing) => set({ editing }),
+  themePreference: loadPreference(),
+  theme: resolveTheme(loadPreference()),
+  setTheme: (themePreference) => {
+    savePreference(themePreference);
+    const theme = resolveTheme(themePreference);
+    applyTheme(theme);
+    set({ themePreference, theme });
+  },
+  setEditing: (editing) => set({ editing, editBuffer: "" }),
   setAi: (ai) => set((state) => ({ ai: { ...state.ai, ...ai } })),
   setAiOpen: (aiOpen) => set({ aiOpen }),
   setUndo: ({ canUndo, canRedo }) => set({ canUndo, canRedo }),

@@ -420,8 +420,98 @@ code with valid code (e.g. `index += 1` → `index += 0`), and a result only cou
 specific named tests fail. Re-checked: every earlier milestone's mutations failed named
 tests, so they were real.
 
+## D048 — Dark mode: semantic tokens, and display-only color adjustments
+UI components use semantic tokens (`paper`, `ink`, `hover`, `edge`, `field`), never
+raw black/white, and each token has a light and a dark value. The theme resolves the system
+setting unless the user picks one (remembered per viewer), and an inline script in
+`index.html` applies it before first paint, so there's no flash. The canvas follows the
+theme for background, grid dots and selection. Shape fills are shared document data and
+never change with a viewer's theme, but a near-black shape disappeared on the dark canvas
+(the AI's title banner, found in the browser). So in dark mode the renderer *draws* very dark
+fills as a lifted slate. Display only, nothing written back, and other viewers are unaffected.
+
+## D049 — Viewers learn their role up front (protocol v3)
+D041 made the server reject a viewer's pushes, but the UI still offered editing tools that
+would fail. Now WELCOME carries `readOnly`, and the client locks every edit path through
+one flag (`Editor.locked`), the same one time-travel preview uses, so there's no second
+code path to forget. The toolbar disables editing tools and the sync pill says "View only".
+Tested: a viewer's client reports `readOnly: true`, an editor's `false`.
+
 ## D013 — Tree correctness is checked against a reference implementation
 The test oracle is a 10-line naive version: sort every op by timestamp, replay from empty,
 skip cycles. The real engine must equal it for every delivery order. Mutation checks:
 removing the cycle check fails 3 tests; removing undo/redo (apply in arrival order, the
 naive approach) fails 5, including the fuzz and order-independence properties.
+
+## D050 — A product shell: homepage, dashboard, board (M10)
+Feedback after M9: the engine was deep but the product felt thin: one screen, no home, no
+way to find a board again. The app is now three routes (`/`, `/boards`, `/b/:id`) on a
+40-line router (no library for three routes). Each page is its own lazy chunk, so the
+homepage doesn't download PixiJS or the CRDT engine. Old `/?doc=` links still open their
+board. The dashboard lists boards from a per-device registry in localStorage (name, size,
+an SVG thumbnail rendered by the same code as export). The boards themselves live in
+IndexedDB and on the server, so losing the registry loses shortcuts, never data.
+
+## D051 — The board's name is a property map that is never a shape
+Titles must sync (rename on one screen, see it everywhere) and merge like everything else.
+Rather than a new CRDT or message type, the title is an LWW key in a property map under a
+reserved id (`__meta__`) that is never attached to the tree, so `shapes()` can't see it,
+undo doesn't track it, and every existing sync, storage and snapshot path carries it
+for free. Tested: it syncs, it's capped, it never shows up as a shape.
+
+## D052 — Connectors attach by id and are routed when drawn
+An arrow stores `from`/`to` shape ids plus free endpoints (normalized to its box). Where an
+attached end actually is gets computed at render time from the shape it points at: on its
+outline (rectangle, ellipse or diamond, rotation included), aimed at the other end. So
+moving a shape never writes to its arrows: no write amplification, and no conflict when
+one person moves a shape while another edits the arrow. Deleting a shape deletes the
+arrows attached to it in the same undo step. Rejected: storing endpoint coordinates and
+updating them on every move (N extra writes per drag frame, and concurrent moves of the two
+ends would fight over one value).
+
+## D053 — New shape properties are optional LWW keys with an explicit "empty"
+rotation, points, from, to and author are optional. Restoring an old version must clear a
+property added since, but an LWW map can't delete a key, so each optional key has an
+"empty" value (`""` or `0`) that reads back as absent. `restoreTo` writes the empty value
+when the version didn't have the key. Old documents need no migration: a missing key and
+an empty one read the same.
+
+## D054 — Frames contain by geometry, not by tree parent
+Dragging a frame moves whatever sits inside it when the drag starts. The move tree could
+nest shapes under frames, but then every drop onto or off a frame would be a reparent,
+concurrent reparents would need a policy, and z-order would become per-frame. Spatial
+containment gives the behavior people expect with none of that. Frames are hit only on
+their title and border, so you can still marquee-select inside one, and they're sent to
+the back when created so they never cover their contents.
+
+## D055 — Presence grew optional fields behind a flag byte
+Follow mode needs each person's visible rectangle; cursor chat and reactions need short
+ephemeral payloads. They ride on presence (never stored), appended after the existing
+record behind one flag byte, so an older reader stops before them. A reaction carries a
+counter so the same emoji twice still shows twice, and a reaction from someone you've only
+just met isn't replayed. Following eases your camera toward their view every frame and
+stops the moment you pan or zoom yourself.
+
+## D056 — Share links are minted by the server, never escalate, and say when they're not enforced
+`POST /share` returns a token for one document and role, only to a caller holding an
+EDITOR token for that document, and never past the caller's own expiry. A viewer can't
+mint an editor link. On a server without `AUTH_SECRET` (dev mode) there is nothing to
+enforce, so the view link only locks this app's UI, and the share dialog says exactly that
+instead of implying security it doesn't have.
+
+## D057 — Export is drawn from the document, not screenshotted
+SVG export walks the shapes and writes vector elements (rotation, attached arrows and
+labels included); PNG rasterizes that SVG at 2×; PDF prints it. A screenshot would only
+cover what's on screen, at screen resolution, with selection handles in it. The same
+function draws the dashboard thumbnails, with labels off.
+
+## D058 — Diagrams: lenient edge ends, and mind maps as a tree (found by evaluating the real model)
+The first diagram design asked for `nodes` + `edges` for both flowcharts and mind maps.
+The real-model eval (`pnpm --filter @canvas/ai eval:diagram`, gemma3:4b) showed two
+failures unit tests couldn't: the model often wires edges by a node's *label* instead of its
+id (PR flowchart: 15 items rejected, 3 nodes left unconnected), and for mind maps it lost
+track of ids entirely (3 nodes, 0 usable edges). Fixes: an edge end resolves to an exact id
+or, failing that, the node whose label matches; and mind maps use a nested schema
+(center → branches → ideas) whose edges the reader creates itself, so they can't be
+mis-wired. After: PR flowchart 13 nodes / 13 edges / 0 unconnected; mind maps 17 nodes /
+16 edges / 0 rejected.

@@ -9,7 +9,7 @@
  *   server delta  doc.merge → journal → patch to UI
  *   history       server state at seq N → shapes to UI (read-only preview)
  */
-import { CanvasDocument, touchedIds, type DocDelta, type ShapeView } from "@canvas/doc";
+import { CanvasDocument, META_ID, touchedIds, type DocDelta, type ShapeView } from "@canvas/doc";
 import { LocalStore, OfflineReplica } from "@canvas/sync/offline";
 import type { EditCommand, EngineCommand, EngineEvent, PatchEvent } from "./protocol";
 
@@ -28,6 +28,10 @@ function patchFor(doc: CanvasDocument, seq: number, delta: DocDelta, started: nu
   const upserts = [];
   const removes = [];
   for (const id of touchedIds(delta)) {
+    if (id === META_ID) {
+      scope.postMessage({ type: "title", title: doc.title });
+      continue;
+    }
     const view = doc.shape(id);
     if (view) upserts.push(view);
     else removes.push(id);
@@ -58,6 +62,10 @@ async function edit(replica: OfflineReplica, command: EditCommand): Promise<DocD
       return doc.deleteShapes(command.ids, options);
     case "front":
       return doc.bringToFront(command.ids, options);
+    case "back":
+      return doc.sendToBack(command.ids, options);
+    case "title":
+      return doc.setTitle(command.title);
     case "undo":
     case "redo": {
       const result = command.type === "undo" ? doc.undo() : doc.redo();
@@ -98,6 +106,7 @@ async function open(url: string, docId: string, online: boolean, token: string |
   });
 
   const shapes = replica.doc.shapes();
+  scope.postMessage({ type: "title", title: replica.doc.title });
   scope.postMessage({ type: "patch", seq: 0, upserts: shapes, removes: [], order: shapes.map((s) => s.id), engineMs: 0, remote: true });
   scope.postMessage({
     type: "restored",
@@ -106,7 +115,7 @@ async function open(url: string, docId: string, online: boolean, token: string |
     pending: replica.restored.pending,
     persistent: storage !== undefined,
   });
-  scope.postMessage({ type: "sync", status: "offline", pending: replica.sync.pending, cursor: replica.sync.cursor });
+  scope.postMessage({ type: "sync", status: "offline", pending: replica.sync.pending, cursor: replica.sync.cursor, readOnly: false });
   if (online) replica.start();
   return replica;
 }
@@ -153,7 +162,7 @@ scope.addEventListener("message", (event) => {
             scope.postMessage(patchFor(replica.doc, command_.seq, delta, started, false));
             replica.commit(delta);
           }
-          if (command_.type !== "undo" && command_.type !== "redo" && command_.type !== "restore") {
+          if (command_.type !== "undo" && command_.type !== "redo" && command_.type !== "restore" && command_.type !== "title") {
             scope.postMessage({ type: "undoState", canUndo: replica.doc.canUndo, canRedo: replica.doc.canRedo });
           }
         } catch (error) {

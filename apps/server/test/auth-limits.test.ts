@@ -33,7 +33,7 @@ function client(server: SyncServer, name: string, token?: string) {
   });
   cleanup.push(() => sync.stop());
   sync.start();
-  return { doc, sync, lastError: () => states.at(-1)?.error };
+  return { doc, sync, lastError: () => states.at(-1)?.error, readOnly: () => states.at(-1)?.readOnly };
 }
 
 async function until(condition: () => boolean, what: string): Promise<void> {
@@ -80,6 +80,9 @@ describe("server with auth", () => {
     const editor = client(server, "editor", token());
     const viewer = client(server, "viewer", token({ role: "viewer", sub: "user-2" }));
     await until(() => editor.sync.status === "online" && viewer.sync.status === "online", "both online");
+    // The server tells each client its role up front, so the UI can lock editing.
+    expect(viewer.readOnly()).toBe(true);
+    expect(editor.readOnly()).toBe(false);
 
     editor.sync.push(editor.doc.createShapes([{ id: "s", props: rect() }]));
     await until(() => viewer.doc.shape("s") !== undefined, "viewer receives edits");
@@ -130,5 +133,27 @@ describe("rate limits", () => {
     }
     await until(() => closeCode !== 0, "flooder disconnected");
     expect(closeCode).toBe(4429);
+  });
+});
+
+describe("share links", () => {
+  const share = (server: SyncServer, body: unknown) =>
+    fetch(`http://127.0.0.1:${server.port}/share`, { method: "POST", body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: (await r.json()) as Record<string, unknown> }));
+
+  it("editors can mint viewer links; viewers and strangers cannot", async () => {
+    const server = await serve({ authSecret: SECRET });
+    const minted = await share(server, { docId: "doc", token: token(), role: "viewer" });
+    expect(minted.status).toBe(200);
+    const claims = verifyToken(SECRET, String(minted.body.token), "doc");
+    expect(claims).toMatchObject({ role: "viewer", doc: "doc" });
+    expect((await share(server, { docId: "doc", token: token({ role: "viewer" }), role: "editor" })).status).toBe(403);
+    expect((await share(server, { docId: "doc", role: "viewer" })).status).toBe(403);
+    expect((await share(server, { docId: "other", token: token(), role: "viewer" })).status).toBe(403);
+    expect((await share(server, { docId: "bad id!", token: token(), role: "viewer" })).status).toBe(400);
+  });
+
+  it("reports an open server (no auth) so links need no token", async () => {
+    const server = await serve();
+    expect((await share(server, { docId: "doc", role: "viewer" })).body).toEqual({ auth: false });
   });
 });

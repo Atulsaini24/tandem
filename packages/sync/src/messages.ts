@@ -11,15 +11,15 @@ import { DecodeError, Reader, Writer } from "./codec.js";
  *                     PRESENCE  payload                 (ephemeral, latest wins)
  *                     HISTORY?  requestId, at           ("what did the doc look like at seq N?")
  *   server → client   DELTA     serverSeq, delta        (backlog after HELLO, then live)
- *                     WELCOME   head                    (backlog done, you're live)
+ *                     WELCOME   head, readOnly          (backlog done, you're live)
  *                     ACK       clientSeq, serverSeq    (your push is durable)
  *                     PRESENCE  clientId, payload       (someone's cursor/selection)
  *                     LEAVE     clientId                (their connection closed)
  *                     HISTORY   requestId, at, head, state (encoded DocDelta at seq `at`)
  *                     ERROR     fatal, message
  */
-/** v2: HELLO carries an access token (empty when the server runs without auth). */
-export const PROTOCOL_VERSION = 2;
+/** v2: HELLO carries an access token. v3: WELCOME says whether this client may edit. */
+export const PROTOCOL_VERSION = 3;
 
 const HELLO = 1;
 const PUSH = 2;
@@ -47,7 +47,7 @@ export type ClientMessage =
   | { readonly type: "history"; readonly requestId: number; readonly at: number };
 
 export type ServerMessage =
-  | { readonly type: "welcome"; readonly head: number }
+  | { readonly type: "welcome"; readonly head: number; readonly readOnly: boolean }
   | { readonly type: "delta"; readonly serverSeq: number; readonly delta: Uint8Array }
   | { readonly type: "ack"; readonly clientSeq: number; readonly serverSeq: number }
   | { readonly type: "presence"; readonly clientId: string; readonly payload: Uint8Array }
@@ -121,6 +121,7 @@ export function encodeServerMessage(message: ServerMessage): Uint8Array {
     case "welcome":
       w.byte(WELCOME);
       w.uint(message.head);
+      w.byte(message.readOnly ? 1 : 0);
       break;
     case "delta":
       w.byte(DELTA);
@@ -163,7 +164,7 @@ export function decodeServerMessage(bytes: Uint8Array): ServerMessage {
   let message: ServerMessage;
   switch (type) {
     case WELCOME:
-      message = { type: "welcome", head: r.uint() };
+      message = { type: "welcome", head: r.uint(), readOnly: r.byte() === 1 };
       break;
     case DELTA:
       return { type: "delta", serverSeq: r.uint(), delta: r.rest() };

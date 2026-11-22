@@ -21,7 +21,7 @@ export function HistoryPanel({ editor }: { editor: Editor | null }) {
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: 30, opacity: 0 }}
             transition={spring}
-            className="pointer-events-auto w-full max-w-[640px] rounded-3xl border border-black/10 bg-paper/95 p-4 shadow-[0_18px_48px_rgba(25,29,37,0.16)] backdrop-blur-md"
+            className="pointer-events-auto w-full max-w-[640px] rounded-3xl border border-edge bg-paper/95 p-4 shadow-[0_18px_48px_rgba(25,29,37,0.16)] backdrop-blur-md"
           >
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
@@ -43,7 +43,7 @@ export function HistoryPanel({ editor }: { editor: Editor | null }) {
                   type="button"
                   whileTap={{ scale: 0.96 }}
                   onClick={() => editor?.closeHistory()}
-                  className="h-10 rounded-full px-4 text-[13px] font-semibold text-ink hover:bg-black/5"
+                  className="h-10 rounded-full px-4 text-[13px] font-semibold text-ink hover:bg-hover"
                 >
                   Back to live
                 </motion.button>
@@ -52,7 +52,7 @@ export function HistoryPanel({ editor }: { editor: Editor | null }) {
                   whileTap={{ scale: 0.96 }}
                   disabled={history.loading || history.at >= history.head}
                   onClick={() => editor?.restoreVersion()}
-                  className="h-10 rounded-full bg-ink px-4 text-[13px] font-semibold text-white disabled:opacity-30"
+                  className="h-10 rounded-full bg-ink px-4 text-[13px] font-semibold text-paper disabled:opacity-30"
                 >
                   Restore this version
                 </motion.button>

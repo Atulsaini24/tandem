@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
-import { CanvasDocument, type DocDelta, type ShapeProps } from "../src/index.js";
+import { CanvasDocument, formatPoints, parsePoints, type DocDelta, type ShapeProps } from "../src/index.js";
 
 const rect = (x = 0, y = 0): ShapeProps => ({ kind: "rect", x, y, w: 10, h: 10, fill: 0x2f63ff });
 
@@ -27,6 +27,8 @@ describe("CanvasDocument", () => {
     expect(doc.shape("s1")).toMatchObject({ x: 50, fill: 0xff0000, y: 0 });
     doc.bringToFront(["s1"]);
     expect(doc.shapes().map((s) => s.id)).toEqual(["s2", "s3", "s1"]);
+    doc.sendToBack(["s3"]);
+    expect(doc.shapes().map((s) => s.id)).toEqual(["s3", "s2", "s1"]);
     doc.deleteShapes(["s2"]);
     expect(doc.shape("s2")).toBeUndefined();
     expect(doc.shapes().map((s) => s.id)).toEqual(["s3", "s1"]);
@@ -94,6 +96,16 @@ describe("CanvasDocument", () => {
     expect(doc.shape("s")?.label).toBeUndefined();
   });
 
+  it("board title syncs like a property but is never a shape", () => {
+    const alice = new CanvasDocument("alice");
+    const bob = new CanvasDocument("bob");
+    bob.merge(alice.setTitle("  Q3   launch  plan "));
+    expect(bob.title).toBe("Q3 launch plan");
+    expect(bob.shapes()).toEqual([]);
+    bob.merge(alice.setTitle("x".repeat(500)));
+    expect(bob.title).toHaveLength(120);
+  });
+
   it("merge reports which shapes changed", () => {
     const alice = new CanvasDocument("alice");
     const bob = new CanvasDocument("bob");
@@ -150,5 +162,25 @@ describe("CanvasDocument convergence", () => {
       ),
       { numRuns: 1_000 },
     );
+  });
+});
+
+describe("rich shapes", () => {
+  it("arrows, pen strokes and rotation round-trip and restore", () => {
+    const doc = new CanvasDocument("a");
+    doc.createShapes([
+      { id: "a", props: rect() },
+      { id: "arrow", props: { kind: "arrow", x: 0, y: 0, w: 50, h: 20, fill: 0, points: formatPoints([{ x: 0, y: 0 }, { x: 1, y: 1 }]), from: "a" } },
+    ]);
+    const version = doc.shapes();
+    expect(doc.shape("arrow")).toMatchObject({ kind: "arrow", from: "a", points: "0,0 1,1" });
+    expect(doc.shape("arrow")?.to).toBeUndefined();
+    doc.updateShapes([{ id: "a", patch: { rotation: 0.5 } }, { id: "arrow", patch: { to: "a" } }]);
+    expect(doc.shape("a")?.rotation).toBe(0.5);
+    doc.restoreTo(version);
+    expect(doc.shape("a")?.rotation).toBeUndefined();
+    expect(doc.shape("arrow")?.to).toBeUndefined();
+    expect(parsePoints("0,0 1,0.5 bad 2")).toEqual([{ x: 0, y: 0 }, { x: 1, y: 0.5 }]);
+    expect(() => doc.updateShapes([{ id: "a", patch: { rotation: Number.NaN } }])).toThrow(RangeError);
   });
 });

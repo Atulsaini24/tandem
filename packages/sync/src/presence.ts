@@ -14,9 +14,20 @@ export interface Presence {
   readonly color: number;
   readonly cursor: { readonly x: number; readonly y: number } | null;
   readonly selection: readonly string[];
+  /** The world rectangle this person is looking at (so others can follow them). */
+  readonly view?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  /** Cursor chat: a short message shown next to their cursor while it's set. */
+  readonly chat?: string;
+  /** The latest emoji reaction; `n` changes with every new one so repeats still show. */
+  readonly reaction?: { readonly emoji: string; readonly n: number };
 }
 
 export const MAX_PRESENCE_NAME = 40;
+export const MAX_PRESENCE_CHAT = 120;
+const MAX_EMOJI = 16;
+const VIEW = 1;
+const CHAT = 2;
+const REACTION = 4;
 export const MAX_PRESENCE_SELECTION = 200;
 
 export function encodePresence(presence: Presence): Uint8Array {
@@ -33,6 +44,20 @@ export function encodePresence(presence: Presence): Uint8Array {
   const selection = presence.selection.slice(0, MAX_PRESENCE_SELECTION);
   w.uint(selection.length);
   for (const id of selection) w.str(id);
+  // Optional fields after the base record, behind a flag byte (older readers stop above).
+  const view = presence.view && [presence.view.x, presence.view.y, presence.view.w, presence.view.h].every(Number.isFinite) ? presence.view : undefined;
+  const chat = presence.chat ? Array.from(presence.chat).slice(0, MAX_PRESENCE_CHAT).join("") : "";
+  const reaction = presence.reaction && presence.reaction.emoji ? presence.reaction : undefined;
+  const flags = (view ? VIEW : 0) | (chat ? CHAT : 0) | (reaction ? REACTION : 0);
+  if (flags !== 0) {
+    w.byte(flags);
+    if (view) for (const v of [view.x, view.y, view.w, view.h]) w.f64(v);
+    if (chat) w.str(chat);
+    if (reaction) {
+      w.str(Array.from(reaction.emoji).slice(0, MAX_EMOJI).join(""));
+      w.uint(Math.max(0, Math.floor(reaction.n)) % 1_000_000);
+    }
+  }
   return w.finish();
 }
 
@@ -57,6 +82,26 @@ export function decodePresence(bytes: Uint8Array): Presence {
   if (count > MAX_PRESENCE_SELECTION) throw new DecodeError("presence selection too large");
   const selection: string[] = [];
   for (let i = 0; i < count; i++) selection.push(r.str());
+  const presence: { -readonly [K in keyof Presence]: Presence[K] } = { name, color, cursor, selection };
+  if (r.remaining > 0) {
+    const flags = r.byte();
+    if (flags & ~(VIEW | CHAT | REACTION)) throw new DecodeError("bad presence flags");
+    if (flags & VIEW) {
+      const [x, y, w, h] = [r.f64(), r.f64(), r.f64(), r.f64()];
+      if (![x, y, w, h].every(Number.isFinite)) throw new DecodeError("presence view not finite");
+      presence.view = { x, y, w, h };
+    }
+    if (flags & CHAT) {
+      const chat = r.str();
+      if (Array.from(chat).length > MAX_PRESENCE_CHAT) throw new DecodeError("presence chat too long");
+      presence.chat = chat;
+    }
+    if (flags & REACTION) {
+      const emoji = r.str();
+      if (Array.from(emoji).length > MAX_EMOJI) throw new DecodeError("presence emoji too long");
+      presence.reaction = { emoji, n: r.uint() };
+    }
+  }
   r.end();
-  return { name, color, cursor, selection };
+  return presence;
 }

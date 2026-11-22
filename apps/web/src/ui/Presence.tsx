@@ -49,7 +49,7 @@ export function Avatars() {
             initial={{ scale: 0.4, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.4, opacity: 0 }}
-            className="-ml-2 grid h-9 w-9 place-items-center rounded-full border-2 border-paper bg-ink text-[11px] font-bold text-white"
+            className="-ml-2 grid h-9 w-9 place-items-center rounded-full border-2 border-paper bg-ink text-[11px] font-bold text-paper"
           >
             +{extra}
           </motion.div>
@@ -79,7 +79,7 @@ export function Notice() {
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: -10, opacity: 0 }}
             transition={spring}
-            className="rounded-full bg-ink px-5 py-3 text-[13px] font-semibold text-white shadow-[0_12px_32px_rgba(17,19,24,0.25)]"
+            className="rounded-full bg-ink px-5 py-3 text-[13px] font-semibold text-paper shadow-[0_12px_32px_rgba(17,19,24,0.25)]"
           >
             {notice}
           </motion.div>

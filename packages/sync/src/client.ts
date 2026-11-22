@@ -24,6 +24,8 @@ export interface SyncState {
   readonly pending: number;
   /** Highest server sequence number this client has seen. */
   readonly cursor: number;
+  /** The server said this client may only view (a viewer token). */
+  readonly readOnly: boolean;
   readonly error?: string;
 }
 
@@ -135,6 +137,7 @@ export class SyncClient {
   #enabled = false;
   #status: SyncStatus = "offline";
   #error: string | undefined;
+  #readOnly = false;
   #cursor: number;
   #outbox: OutboxItem[];
   /** How many outbox items (from the front) have been sent on the current connection. */
@@ -271,6 +274,7 @@ export class SyncClient {
     switch (message.type) {
       case "welcome":
         this.#attempt = 0;
+        this.#readOnly = message.readOnly;
         if (message.head < this.#cursor) {
           // Without this, the server's new seqs 1, 2, 3… would all look "already seen"
           // to us and every future edit from others would be silently dropped.
@@ -365,7 +369,7 @@ export class SyncClient {
   }
 
   #emit(): void {
-    const base = { status: this.#status, pending: this.#outbox.length, cursor: this.#cursor };
+    const base = { status: this.#status, pending: this.#outbox.length, cursor: this.#cursor, readOnly: this.#readOnly };
     this.#options.onState?.(this.#error === undefined ? base : { ...base, error: this.#error });
   }
 }
