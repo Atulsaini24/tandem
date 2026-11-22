@@ -54,3 +54,41 @@ Three layers, all on every CRDT:
    because replicas can agree on the wrong answer. 10,000 histories per CRDT.
 4. **Mutation check**: deliberately breaking `mergeInto` to "last arrival wins" makes the
    suite fail with a shrunk 2-write counterexample, so the tests can actually catch bugs.
+
+## D008 — Tree moves use Kleppmann's undo-do-redo algorithm
+Problem: Alice moves A into B while Bob moves B into A. Applying both creates a cycle and
+the subtree disappears from the document. Alternatives considered:
+- **LWW on `parent`**: converges, but can still form cycles (each replica accepts both).
+- **Lock / server decides**: breaks offline editing, which is the whole point.
+- **Kleppmann et al. 2021 (chosen)**: keep a timestamp-ordered op log; a late op is
+  inserted into the past by undoing newer ops, applying it, and redoing them. Any op that
+  would create a cycle *at its point in history* is skipped. Every replica makes the same
+  skip decisions, so all trees are identical and acyclic.
+- Fits D004: state = set of move ops, merge = set union, tree = pure function of the set.
+- Cost: a late op costs O(number of newer ops) undo/redo. The log grows forever until
+  truncation (LATER.md).
+
+## D009 — Structure and properties are separate CRDTs
+The move tree only stores `parent` and sibling `position`. Shape properties (x, y, color,
+text...) live in a per-node LWW map. Moving a shape and recoloring it concurrently never
+conflict, and the tree log stays small.
+
+## D010 — Sibling order with fractional indexing
+z-order is a base-62 string between neighbours (`positionBetween`). Reordering one shape
+writes one value instead of renumbering every sibling. Concurrent inserts in the same gap
+may get equal positions; ties are broken by node id, so order is still deterministic.
+
+## D011 — Local cycles are errors, remote cycles are silent skips
+A user can't drop a group into itself: `move()` throws `TreeCycleError` and the UI blocks
+it. But a remote op that creates a cycle *because of concurrency* is legal and must be
+skipped deterministically. Throwing there would make replicas diverge.
+
+## D012 — Delete is a move to TRASH
+Deleting is a move, so it goes through the same conflict logic, takes the subtree with
+it, and is undoable (move it back). A concurrent "move into deleted group" stays in TRASH.
+
+## D013 — Tree correctness is checked against a reference implementation
+The test oracle is a 10-line naive version: sort every op by timestamp, replay from empty,
+skip cycles. The real engine must equal it for every delivery order. Mutation checks:
+removing the cycle check fails 3 tests; removing undo/redo (apply in arrival order, the
+naive approach) fails 5, including the fuzz and order-independence properties.

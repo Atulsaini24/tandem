@@ -15,5 +15,16 @@ export {
 export { PNCounter, mergePNCounter, type PNCounterState } from "./pn-counter.js";
 export { LWWRegister, mergeLWWEntry, type LWWEntry } from "./lww-register.js";
 export { LWWMap, mergeLWWMap, type LWWMapEntry, type LWWMapState } from "./lww-map.js";
+export { isValidPosition, positionBetween } from "./fractional-index.js";
+export {
+  MoveTree,
+  ROOT,
+  TRASH,
+  TreeCycleError,
+  type MoveOp,
+  type NodeId,
+  type TreeDelta,
+  type TreeNode,
+} from "./move-tree.js";
 
 export const CRDT_VERSION = "0.0.0";
