@@ -1,6 +1,6 @@
 /**
- * @canvas/sync — wire format, messages and the client side of the sync protocol.
- * Isomorphic: runs in browsers, Web Workers and Node 22.
+ * @canvas/sync — wire format, messages, presence and the client side of the sync
+ * protocol. Isomorphic: runs in browsers, Web Workers and Node 22.
  */
 export { DecodeError, Reader, Writer, decodeDelta, encodeDelta, timestampsOf } from "./codec.js";
 export {
@@ -13,9 +13,20 @@ export {
   type ServerMessage,
 } from "./messages.js";
 export {
+  MAX_PRESENCE_NAME,
+  MAX_PRESENCE_SELECTION,
+  decodePresence,
+  encodePresence,
+  type Presence,
+} from "./presence.js";
+export {
   SyncClient,
+  type OutboxItem,
+  type RemoteDeltaInfo,
   type SocketLike,
   type SyncClientOptions,
+  type SyncResume,
   type SyncState,
   type SyncStatus,
 } from "./client.js";
+// Browser persistence (IndexedDB, Web Locks) lives in "@canvas/sync/offline".

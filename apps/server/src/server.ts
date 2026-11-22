@@ -29,6 +29,8 @@ export interface SyncServer {
 }
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+/** Presence is a name, a color, a point and a capped selection: a few KB at most. */
+const MAX_PRESENCE_BYTES = 16 * 1024;
 
 /** Serializes all work for one document, so serverSeq order = send order to every client. */
 class Room {
@@ -47,6 +49,8 @@ class Room {
 class Connection {
   room: Room | undefined;
   clientId = "";
+  /** Latest presence payload (opaque bytes), replayed to clients who join later. */
+  presence: Uint8Array | undefined;
   constructor(readonly socket: WebSocket) {}
 
   send(message: ServerMessage): void {
@@ -111,7 +115,35 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
       }
       room.clients.add(conn);
       conn.send({ type: "welcome", head: await store.head(room.docId) });
+      // Who's already here: their latest cursors/selections.
+      for (const other of room.clients) {
+        if (other !== conn && other.presence) {
+          conn.send({ type: "presence", clientId: other.clientId, payload: other.presence });
+        }
+      }
     });
+  }
+
+  /**
+   * Presence is relayed, never stored or ordered with deltas: it's ephemeral and only the
+   * latest value matters. The server doesn't decode it; clients decode defensively.
+   */
+  function presence(conn: Connection, payload: Uint8Array): void {
+    const room = conn.room;
+    if (!room) return conn.reject("presence before hello");
+    if (payload.length > MAX_PRESENCE_BYTES) return conn.reject("presence too large");
+    conn.presence = payload;
+    const relay = encodeServerMessage({ type: "presence", clientId: conn.clientId, payload });
+    for (const other of room.clients) if (other !== conn) other.sendRaw(relay);
+  }
+
+  function leave(conn: Connection): void {
+    const room = conn.room;
+    if (!room) return;
+    room.clients.delete(conn);
+    if (!conn.presence) return;
+    const relay = encodeServerMessage({ type: "leave", clientId: conn.clientId });
+    for (const other of room.clients) other.sendRaw(relay);
   }
 
   /** Validate untrusted bytes before they reach the log. Returns an error message or undefined. */
@@ -169,9 +201,10 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
         return conn.reject("malformed message");
       }
       if (message.type === "hello") hello(conn, message);
-      else push(conn, message);
+      else if (message.type === "push") push(conn, message);
+      else presence(conn, message.payload);
     });
-    socket.on("close", () => conn.room?.clients.delete(conn));
+    socket.on("close", () => leave(conn));
     socket.on("error", () => socket.terminate());
   });
 

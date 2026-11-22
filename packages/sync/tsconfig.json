@@ -1,7 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "customConditions": ["source"]
+    "customConditions": ["source"],
+    // IndexedDB, Web Locks and WebSocket types. The code feature-detects at runtime.
+    "lib": ["ES2023", "DOM"]
   },
   "include": ["src", "test", "vitest.config.ts"]
 }

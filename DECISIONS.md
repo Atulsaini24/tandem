@@ -232,6 +232,46 @@ Dedupe has two layers: `ON CONFLICT DO NOTHING` makes a resend a clean "duplicat
 the `UNIQUE (doc_id, client_id, client_seq)` constraint refuses to store a duplicate even
 if that clause is removed (mutation-tested: 2 contract tests fail with a constraint error).
 
+## D030 — Offline persistence is a journal, with one transaction per logical step
+IndexedDB holds, per (document, replica): a snapshot, a log of deltas applied since that
+snapshot, the outbox, and a small record (cursor, nextClientSeq). Restoring = snapshot +
+replay log; the outbox and cursor resume the sync session exactly where it stopped.
+- **The cursor is never saved ahead of the data.** A remote delta and its cursor commit in
+  one transaction, and a local edit commits its log entry, outbox entry and nextClientSeq
+  together. A crash can lose the newest step; it can never leave a state that skips one.
+- Writes queued in the same tick commit in one transaction (a drag doesn't mean 60 tx/s).
+- Compaction: every 500 log entries, the log becomes one snapshot, so restore time stays
+  flat. Snapshots live in their own store, so the frequently rewritten record stays small.
+- Considered: saving the whole document on a timer. Simpler, but loses up to one interval
+  of edits and rewrites megabytes per save.
+
+## D031 — Replica ids are leased with Web Locks
+Two live tabs must never share a replica id: their HLC timestamps and clientSeqs would
+collide, and the server would drop one tab's edits as "duplicates" of the other's. Each
+persisted replica is leased with `navigator.locks` (held until the tab/worker dies). A new
+tab resumes a replica only if no living tab holds it; otherwise it starts a fresh replica,
+seeded with the most recent persisted state (and cursor) but not its outbox: those
+unsent edits belong to the tab that's still alive.
+Found in review, not testing: React StrictMode creates two editors in dev. If both
+opened the document, the throwaway's worker would take the lease and the real editor would
+start fresh, stranding the last session's unsent edits. Only the surviving editor now
+calls `connect()`.
+
+## D032 — Browser-only code has its own entry point
+`@canvas/sync/offline` (IndexedDB, Web Locks) is separate from `@canvas/sync` (codec,
+messages, client). The Node server imports only the latter and its tsconfig has no DOM
+types, so browser APIs can't creep into server code. Server tests that play the browser
+(fake-indexeddb) use a separate `tsconfig.test.json` with DOM types.
+
+## D033 — Presence is ephemeral and separate from the document
+Cursor (world coordinates), selection, name and color are sent ~25×/s, latest wins. The
+server relays presence and never stores or orders it with deltas. It replays everyone's
+latest presence to someone joining, and broadcasts LEAVE when a connection closes.
+Receivers ease each cursor toward its latest position with frame-rate-independent
+exponential smoothing, so 25 updates/s look like 60fps motion. Cursors are drawn in screen
+space (same size at any zoom), and remote selections are outlined in their owner's color.
+Presence is decoded defensively: a malformed payload is ignored, never fatal.
+
 ## D013 — Tree correctness is checked against a reference implementation
 The test oracle is a 10-line naive version: sort every op by timestamp, replay from empty,
 skip cycles. The real engine must equal it for every delivery order. Mutation checks:

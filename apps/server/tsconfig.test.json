@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Tests play the browser too (IndexedDB replicas via fake-indexeddb, Web Locks types).
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}

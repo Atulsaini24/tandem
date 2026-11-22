@@ -3,6 +3,8 @@ import { EngineClient } from "../engine/engine-client";
 import type { EngineEvent } from "../engine/protocol";
 import { useUiStore, type BenchResult } from "../state/ui-store";
 import { Controller } from "./controller";
+import { loadIdentity } from "./identity";
+import { Peers } from "./peers";
 import { Renderer } from "./renderer";
 import { Scene } from "./scene";
 import type { Point } from "./viewport";
@@ -10,6 +12,8 @@ import type { Point } from "./viewport";
 const PALETTE = [0x2f63ff, 0xef6b3a, 0x1e8f5a, 0x7b55e7, 0xdd4f78, 0x137d77, 0xc6513c, 0x111318];
 const STATS_INTERVAL_MS = 500;
 const FRAME_WINDOW = 120;
+/** ~25 presence updates/s; receivers interpolate between them. */
+const PRESENCE_INTERVAL_MS = 40;
 
 const DOC_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -20,6 +24,24 @@ function syncTarget(): { url: string; docId: string } {
   const configured = import.meta.env.VITE_SYNC_URL as string | undefined;
   const scheme = location.protocol === "https:" ? "wss" : "ws";
   return { url: configured ?? `${scheme}://${location.hostname}:8787`, docId };
+}
+
+/** The offline toggle is a per-viewer convenience: remembered across reloads. */
+const offlineKey = (docId: string): string => `canvas:offline:${docId}`;
+function readOffline(docId: string): boolean {
+  try {
+    return localStorage.getItem(offlineKey(docId)) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeOffline(docId: string, offline: boolean): void {
+  try {
+    if (offline) localStorage.setItem(offlineKey(docId), "1");
+    else localStorage.removeItem(offlineKey(docId));
+  } catch {
+    // storage blocked: the toggle just won't survive a reload
+  }
 }
 
 function randomFill(): number {
@@ -36,15 +58,18 @@ function percentile(values: readonly number[], p: number): number {
  * Wires the pieces together:
  *
  *   input (Controller) → Editor actions → Scene (optimistic, instant)
- *                                       → EngineClient → worker (CRDT, truth)
+ *                                       → EngineClient → worker (CRDT, IndexedDB, network)
  *   worker patch → Scene.applyPatch → Renderer (once per frame)
+ *   pointer/selection → presence (throttled) → worker → server → other tabs' Peers
  */
 export class Editor {
   readonly scene = new Scene();
+  readonly peers = new Peers();
   readonly engine = new EngineClient();
   readonly renderer: Renderer;
   #controller: Controller | undefined;
-  readonly #unsubscribe: () => void;
+  readonly #unsubscribe: Array<() => void> = [];
+  #docId = "default";
 
   // Drag updates are coalesced: at most one engine command per frame. A timer backs up
   // the frame: background tabs get no animation frames, and an edit must never wait
@@ -56,14 +81,18 @@ export class Editor {
     if (document.visibilityState === "hidden") this.#flushMoves();
   };
 
+  readonly #me = loadIdentity();
+  #pointer: Point | null = null;
+  #presenceTimer: ReturnType<typeof setTimeout> | undefined;
+
   readonly #frameTimes: number[] = [];
   #statsElapsed = 0;
   #statsFrames = 0;
   #engineMs = 0;
 
   constructor() {
-    this.renderer = new Renderer(this.scene, () => useUiStore.getState().selection);
-    this.#unsubscribe = this.engine.subscribe((event) => this.#onEngine(event));
+    this.renderer = new Renderer(this.scene, () => useUiStore.getState().selection, this.peers);
+    this.#unsubscribe.push(this.engine.subscribe((event) => this.#onEngine(event)));
   }
 
   async init(host: HTMLElement): Promise<void> {
@@ -71,16 +100,38 @@ export class Editor {
     this.#controller = new Controller(this.renderer.app.canvas, this);
     this.renderer.frameListeners.add((dt) => this.#onFrame(dt));
     document.addEventListener("visibilitychange", this.#onHidden);
-
-    const { url, docId } = syncTarget();
-    useUiStore.getState().setSync({ docId });
-    this.engine.send({ type: "connect", url, docId });
+    useUiStore.getState().setMe(this.#me);
+    this.#unsubscribe.push(
+      useUiStore.subscribe((state, previous) => {
+        if (state.selection !== previous.selection) this.#schedulePresence();
+      }),
+    );
   }
 
-  /** The demo toggle: simulate losing / regaining the network. */
+  /**
+   * Open the document and start syncing. Separate from init() on purpose: under React
+   * StrictMode two editors are created and one is thrown away. If both opened the
+   * document, the throwaway's worker would lease the persisted replica first, and the
+   * real editor would start a fresh one, stranding the last session's unsent edits.
+   */
+  connect(): void {
+    const { url, docId } = syncTarget();
+    this.#docId = docId;
+    const online = !readOffline(docId);
+    useUiStore.getState().setSync({ docId, wantOnline: online });
+    this.engine.send({ type: "connect", url, docId, online });
+    this.#schedulePresence();
+  }
+
+  /** The demo toggle: go offline / back online. Remembered across reloads. */
   setOnline(online: boolean): void {
+    writeOffline(this.#docId, !online);
     useUiStore.getState().setSync({ wantOnline: online });
     this.engine.send({ type: "network", online });
+    if (!online) {
+      this.peers.clear(); // we can't see anyone while offline
+      useUiStore.getState().setPeers([]);
+    }
   }
 
   destroy(): void {
@@ -89,8 +140,9 @@ export class Editor {
     if (Reflect.get(globalThis, "__editor") === this) Reflect.deleteProperty(globalThis, "__editor");
     document.removeEventListener("visibilitychange", this.#onHidden);
     clearTimeout(this.#flushTimer);
+    clearTimeout(this.#presenceTimer);
     this.#controller?.destroy();
-    this.#unsubscribe();
+    for (const unsubscribe of this.#unsubscribe) unsubscribe();
     this.engine.terminate();
     this.renderer.destroy();
   }
@@ -103,6 +155,12 @@ export class Editor {
 
   selectAll(): void {
     this.select(this.scene.ids());
+  }
+
+  /** Where this user's pointer is, in world coordinates (null = off the canvas). */
+  updatePointer(world: Point | null): void {
+    this.#pointer = world;
+    this.#schedulePresence();
   }
 
   createShape(kind: ShapeKind, center: Point): void {
@@ -127,16 +185,6 @@ export class Editor {
     for (const { id, x, y } of moves) this.#pendingMoves.set(id, { x, y });
     this.#pendingSeq = seq;
     this.#flushTimer ??= setTimeout(() => this.#flushMoves(), 50);
-  }
-
-  /** Send queued moves to the engine: on the next frame or after 50ms, whichever is first. */
-  #flushMoves(): void {
-    clearTimeout(this.#flushTimer);
-    this.#flushTimer = undefined;
-    if (this.#pendingMoves.size === 0) return;
-    const updates = [...this.#pendingMoves].map(([id, patch]) => ({ id, patch }));
-    this.#pendingMoves.clear();
-    this.engine.send({ type: "update", seq: this.#pendingSeq, updates });
   }
 
   deleteSelection(): void {
@@ -244,23 +292,63 @@ export class Editor {
 
   // --- internals -----------------------------------------------------------
 
+  /** Send queued moves to the engine: on the next frame or after 50ms, whichever is first. */
+  #flushMoves(): void {
+    clearTimeout(this.#flushTimer);
+    this.#flushTimer = undefined;
+    if (this.#pendingMoves.size === 0) return;
+    const updates = [...this.#pendingMoves].map(([id, patch]) => ({ id, patch }));
+    this.#pendingMoves.clear();
+    this.engine.send({ type: "update", seq: this.#pendingSeq, updates });
+  }
+
+  #schedulePresence(): void {
+    this.#presenceTimer ??= setTimeout(() => {
+      this.#presenceTimer = undefined;
+      this.engine.send({
+        type: "presence",
+        presence: {
+          name: this.#me.name,
+          color: this.#me.color,
+          cursor: this.#pointer,
+          selection: [...useUiStore.getState().selection].slice(0, 200),
+        },
+      });
+    }, PRESENCE_INTERVAL_MS);
+  }
+
   #onEngine(event: EngineEvent): void {
-    if (event.type === "sync") {
-      const { status, pending, error } = event;
-      useUiStore.getState().setSync(error === undefined ? { status, pending } : { status, pending, error });
-      return;
-    }
-    if (event.type === "error") {
-      console.error(`engine rejected command #${event.seq}: ${event.message}`);
-      return;
-    }
-    this.scene.applyPatch(event);
-    this.#engineMs = event.engineMs;
-    if (event.removes.length > 0) {
-      const selection = useUiStore.getState().selection;
-      if (event.removes.some((id) => selection.has(id))) {
-        this.select([...selection].filter((id) => this.scene.get(id)));
+    const ui = useUiStore.getState();
+    switch (event.type) {
+      case "sync": {
+        const { status, pending, error } = event;
+        ui.setSync(error === undefined ? { status, pending } : { status, pending, error });
+        if (status !== "online" && this.peers.list().length > 0) {
+          this.peers.clear();
+          ui.setPeers([]);
+        }
+        return;
       }
+      case "error":
+        console.error(`engine rejected command #${event.seq}: ${event.message}`);
+        return;
+      case "restored":
+        if (!event.persistent) ui.setNotice("Offline storage unavailable: edits won't survive a reload");
+        else if (event.pending > 0) {
+          ui.setNotice(`Restored ${event.pending} unsynced edit${event.pending === 1 ? "" : "s"} from your last session`);
+        } else if (event.resumed && event.shapes > 0) ui.setNotice(`Loaded ${event.shapes} shapes from this device`);
+        return;
+      case "presence":
+        if (this.peers.update(event.clientId, event.presence)) {
+          ui.setPeers(this.peers.list().map((p) => ({ clientId: p.clientId, name: p.presence.name, color: p.presence.color })));
+        }
+        return;
+      case "patch":
+        this.scene.applyPatch(event);
+        this.#engineMs = event.engineMs;
+        if (event.removes.length > 0 && event.removes.some((id) => ui.selection.has(id))) {
+          this.select([...ui.selection].filter((id) => this.scene.get(id)));
+        }
     }
   }
 
@@ -303,6 +391,7 @@ export function createEditor(host: HTMLElement): { ready: Promise<Editor | null>
       return null;
     }
     editor = instance;
+    instance.connect(); // only the editor that survives opens the document
     // Debug/benchmark hook for the console and automated tests (surviving editor only).
     Object.assign(globalThis, { __editor: instance });
     return instance;

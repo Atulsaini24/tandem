@@ -3,8 +3,15 @@
 Ideas that are out of scope for the current milestone. Nothing here gets built until
 the current milestone passes its gate.
 
-- **Persist cursor + outbox (M6):** offline edits survive a disconnect but not a page
-  reload yet. M6 stores the document, cursor and outbox in IndexedDB.
+- **Clean up abandoned replica records:** every concurrently-open tab leaves a replica in
+  IndexedDB. Drop records whose outbox is empty and which haven't been used in N days.
+- **Per-tab presence names:** tabs in the same browser share one identity ("Sunny Lynx"
+  twice). Fine for real multi-user use; add a tab suffix or real accounts (M8).
+- **Idle cursors:** fade a peer's cursor after ~30s without movement.
+- **Snapshot cost on big docs:** compaction re-encodes the whole document (in the worker).
+  Fine at 5k shapes; at 100k, snapshot incrementally or on idle.
+- **Persistent storage permission:** call `navigator.storage.persist()` so the browser
+  doesn't evict IndexedDB under storage pressure.
 - **Log compaction / snapshots (M7):** a new client replays the whole delta log. Periodically
   snapshot the merged state, and serve snapshot + tail.
 - **Coalesce drag deltas in the outbox:** a drag pushes ~60 deltas/s. Consecutive LWW writes

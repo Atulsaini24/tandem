@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import type { Editor } from "../canvas/editor";
 import { useUiStore } from "../state/ui-store";
+import { Avatars } from "./Presence";
 
 const spring = { type: "spring", stiffness: 420, damping: 34 } as const;
 
@@ -20,7 +21,8 @@ export function SyncPill({ editor }: { editor: Editor | null }) {
   const sync = useUiStore((s) => s.sync);
   const view = describe(sync.status, sync.pending, sync.wantOnline, sync.error);
   return (
-    <div className="pointer-events-none absolute right-4 top-4">
+    <div className="pointer-events-none absolute right-4 top-4 flex items-center gap-3">
+      <Avatars />
       <motion.button
         type="button"
         disabled={!editor}

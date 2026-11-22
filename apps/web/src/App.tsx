@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createEditor, type Editor } from "./canvas/editor";
 import { Hud, KeyHints } from "./ui/Hud";
+import { Notice } from "./ui/Presence";
 import { SyncPill } from "./ui/SyncPill";
 import { Toolbar } from "./ui/Toolbar";
 
@@ -30,6 +31,7 @@ export function App() {
       <SyncPill editor={editor} />
       <Hud />
       <KeyHints />
+      <Notice />
     </div>
   );
 }

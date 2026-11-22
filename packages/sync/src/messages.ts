@@ -3,47 +3,63 @@ import { DecodeError, Reader, Writer } from "./codec.js";
 /**
  * Wire messages. One binary WebSocket frame = one message; the first byte is its type.
  *
- * Deltas travel as opaque, already-encoded bytes: the server validates a pushed delta
- * once, stores those exact bytes, and relays them to other clients without re-encoding.
+ * Deltas and presence travel as opaque, already-encoded bytes: the server validates a
+ * pushed delta once, stores those exact bytes, and relays them without re-encoding.
  *
- *   client → server   HELLO  version, docId, clientId, since (last server seq seen)
- *                     PUSH   clientSeq, delta
- *   server → client   DELTA  serverSeq, delta      (backlog after HELLO, then live)
- *                     WELCOME head                 (backlog done, you're live)
- *                     ACK    clientSeq, serverSeq  (your push is durable)
- *                     ERROR  fatal, message
+ *   client → server   HELLO     version, docId, clientId, since (last server seq seen)
+ *                     PUSH      clientSeq, delta
+ *                     PRESENCE  payload                 (ephemeral, latest wins)
+ *   server → client   DELTA     serverSeq, delta        (backlog after HELLO, then live)
+ *                     WELCOME   head                    (backlog done, you're live)
+ *                     ACK       clientSeq, serverSeq    (your push is durable)
+ *                     PRESENCE  clientId, payload       (someone's cursor/selection)
+ *                     LEAVE     clientId                (their connection closed)
+ *                     ERROR     fatal, message
  */
 export const PROTOCOL_VERSION = 1;
 
 const HELLO = 1;
 const PUSH = 2;
+const CLIENT_PRESENCE = 3;
 const WELCOME = 16;
 const DELTA = 17;
 const ACK = 18;
 const ERROR = 19;
+const SERVER_PRESENCE = 20;
+const LEAVE = 21;
 
 export type ClientMessage =
   | { readonly type: "hello"; readonly version: number; readonly docId: string; readonly clientId: string; readonly since: number }
-  | { readonly type: "push"; readonly clientSeq: number; readonly delta: Uint8Array };
+  | { readonly type: "push"; readonly clientSeq: number; readonly delta: Uint8Array }
+  | { readonly type: "presence"; readonly payload: Uint8Array };
 
 export type ServerMessage =
   | { readonly type: "welcome"; readonly head: number }
   | { readonly type: "delta"; readonly serverSeq: number; readonly delta: Uint8Array }
   | { readonly type: "ack"; readonly clientSeq: number; readonly serverSeq: number }
+  | { readonly type: "presence"; readonly clientId: string; readonly payload: Uint8Array }
+  | { readonly type: "leave"; readonly clientId: string }
   | { readonly type: "error"; readonly fatal: boolean; readonly message: string };
 
 export function encodeClientMessage(message: ClientMessage): Uint8Array {
   const w = new Writer();
-  if (message.type === "hello") {
-    w.byte(HELLO);
-    w.uint(message.version);
-    w.str(message.docId);
-    w.str(message.clientId);
-    w.uint(message.since);
-  } else {
-    w.byte(PUSH);
-    w.uint(message.clientSeq);
-    w.bytes(message.delta);
+  switch (message.type) {
+    case "hello":
+      w.byte(HELLO);
+      w.uint(message.version);
+      w.str(message.docId);
+      w.str(message.clientId);
+      w.uint(message.since);
+      break;
+    case "push":
+      w.byte(PUSH);
+      w.uint(message.clientSeq);
+      w.bytes(message.delta);
+      break;
+    case "presence":
+      w.byte(CLIENT_PRESENCE);
+      w.bytes(message.payload);
+      break;
   }
   return w.finish();
 }
@@ -57,6 +73,7 @@ export function decodeClientMessage(bytes: Uint8Array): ClientMessage {
     return message;
   }
   if (type === PUSH) return { type: "push", clientSeq: r.uint(), delta: r.rest() };
+  if (type === CLIENT_PRESENCE) return { type: "presence", payload: r.rest() };
   throw new DecodeError(`unknown client message type ${type}`);
 }
 
@@ -76,6 +93,15 @@ export function encodeServerMessage(message: ServerMessage): Uint8Array {
       w.byte(ACK);
       w.uint(message.clientSeq);
       w.uint(message.serverSeq);
+      break;
+    case "presence":
+      w.byte(SERVER_PRESENCE);
+      w.str(message.clientId);
+      w.bytes(message.payload);
+      break;
+    case "leave":
+      w.byte(LEAVE);
+      w.str(message.clientId);
       break;
     case "error":
       w.byte(ERROR);
@@ -98,6 +124,11 @@ export function decodeServerMessage(bytes: Uint8Array): ServerMessage {
       return { type: "delta", serverSeq: r.uint(), delta: r.rest() };
     case ACK:
       message = { type: "ack", clientSeq: r.uint(), serverSeq: r.uint() };
+      break;
+    case SERVER_PRESENCE:
+      return { type: "presence", clientId: r.str(), payload: r.rest() };
+    case LEAVE:
+      message = { type: "leave", clientId: r.str() };
       break;
     case ERROR:
       message = { type: "error", fatal: r.byte() === 1, message: r.str() };

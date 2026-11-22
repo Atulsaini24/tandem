@@ -1,13 +1,14 @@
 /**
- * The engine worker: owns the CRDT document and the sync connection. All CRDT work
- * (clocks, op logs, undo/redo, merges) and all network I/O happen here, so neither
+ * The engine worker: owns the CRDT document, its IndexedDB journal and the sync
+ * connection. All CRDT work, storage I/O and network I/O happen here, so none of it
  * can stall rendering or input.
  *
- *   UI command → doc (local) → patch to UI + push to server
- *   server delta → doc.merge → patch to UI
+ *   open          IndexedDB → restored document → full patch to UI
+ *   UI command    doc (local) → patch to UI → journal + push to server
+ *   server delta  doc.merge → journal → patch to UI
  */
-import { CanvasDocument, touchedIds, type DocDelta } from "@canvas/doc";
-import { SyncClient } from "@canvas/sync";
+import { type CanvasDocument, touchedIds, type DocDelta } from "@canvas/doc";
+import { LocalStore, OfflineReplica } from "@canvas/sync/offline";
 import type { EditCommand, EngineCommand, EngineEvent, PatchEvent } from "./protocol";
 
 interface WorkerScope {
@@ -16,12 +17,10 @@ interface WorkerScope {
 }
 const scope = self as unknown as WorkerScope;
 
-const replica = crypto.randomUUID();
-const doc = new CanvasDocument(replica);
-let sync: SyncClient | undefined;
+let ready: Promise<OfflineReplica | undefined> = Promise.resolve(undefined);
 let lastSeq = 0;
 
-function apply(command: EditCommand): DocDelta {
+function apply(doc: CanvasDocument, command: EditCommand): DocDelta {
   switch (command.type) {
     case "create":
       return doc.createShapes(command.shapes);
@@ -34,7 +33,7 @@ function apply(command: EditCommand): DocDelta {
   }
 }
 
-function patchFor(seq: number, delta: DocDelta, started: number, remote: boolean): PatchEvent {
+function patchFor(doc: CanvasDocument, seq: number, delta: DocDelta, started: number, remote: boolean): PatchEvent {
   const upserts = [];
   const removes = [];
   for (const id of touchedIds(delta)) {
@@ -48,38 +47,67 @@ function patchFor(seq: number, delta: DocDelta, started: number, remote: boolean
   return order ? { ...base, order, engineMs } : { ...base, engineMs };
 }
 
-function connect(url: string, docId: string): void {
-  sync?.stop();
-  sync = new SyncClient({
+async function open(url: string, docId: string, online: boolean): Promise<OfflineReplica> {
+  let storage: LocalStore | undefined;
+  try {
+    storage = await LocalStore.open();
+  } catch (error) {
+    // Private browsing / blocked storage: keep working, just without offline persistence.
+    console.warn("IndexedDB unavailable, running without offline persistence", error);
+  }
+  const replica: OfflineReplica = await OfflineReplica.open({
     url,
     docId,
-    clientId: replica,
-    onDelta: (delta) => {
-      const started = performance.now();
-      doc.merge(delta);
-      scope.postMessage(patchFor(lastSeq, delta, started, true));
-    },
+    ...(storage ? { storage } : {}),
+    onRemote: (delta) => scope.postMessage(patchFor(replica.doc, lastSeq, delta, performance.now(), true)),
     onState: (state) => scope.postMessage({ type: "sync", ...state }),
+    onPresence: (clientId, presence) => scope.postMessage({ type: "presence", clientId, presence }),
   });
-  sync.start();
+
+  const shapes = replica.doc.shapes();
+  scope.postMessage({ type: "patch", seq: 0, upserts: shapes, removes: [], order: shapes.map((s) => s.id), engineMs: 0, remote: true });
+  scope.postMessage({
+    type: "restored",
+    resumed: replica.restored.resumed,
+    shapes: shapes.length,
+    pending: replica.restored.pending,
+    persistent: storage !== undefined,
+  });
+  scope.postMessage({ type: "sync", status: "offline", pending: replica.sync.pending, cursor: replica.sync.cursor });
+  if (online) replica.start();
+  return replica;
 }
 
 scope.addEventListener("message", (event) => {
   const command = event.data;
-  if (command.type === "connect") return connect(command.url, command.docId);
-  if (command.type === "network") {
-    if (command.online) sync?.start();
-    else sync?.stop();
-    return;
-  }
-
-  const started = performance.now();
-  try {
-    const delta = apply(command);
-    lastSeq = command.seq;
-    scope.postMessage(patchFor(command.seq, delta, started, false));
-    sync?.push(delta);
-  } catch (error) {
-    scope.postMessage({ type: "error", seq: command.seq, message: error instanceof Error ? error.message : String(error) });
+  switch (command.type) {
+    case "connect":
+      ready = open(command.url, command.docId, command.online).catch((error: unknown) => {
+        console.error("failed to open document", error);
+        return undefined;
+      });
+      return;
+    case "network":
+      void ready.then((replica) => (command.online ? replica?.start() : replica?.stop()));
+      return;
+    case "presence":
+      void ready.then((replica) => replica?.setPresence(command.presence));
+      return;
+    default: {
+      // Edits queue behind `ready`, so commands sent while IndexedDB loads aren't lost.
+      const edit = command;
+      void ready.then((replica) => {
+        if (!replica) return;
+        const started = performance.now();
+        try {
+          const delta = apply(replica.doc, edit);
+          lastSeq = edit.seq;
+          scope.postMessage(patchFor(replica.doc, edit.seq, delta, started, false));
+          replica.commit(delta);
+        } catch (error) {
+          scope.postMessage({ type: "error", seq: edit.seq, message: error instanceof Error ? error.message : String(error) });
+        }
+      });
+    }
   }
 });

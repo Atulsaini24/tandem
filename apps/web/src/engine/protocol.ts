@@ -1,5 +1,5 @@
 import type { NodeId, ShapeProps, ShapeView } from "@canvas/doc";
-import type { SyncStatus } from "@canvas/sync";
+import type { Presence, SyncStatus } from "@canvas/sync";
 
 /**
  * Messages between the UI thread and the engine worker.
@@ -20,9 +20,11 @@ export type EditCommand =
   | { readonly type: "front"; readonly seq: number; readonly ids: readonly NodeId[] };
 
 export type ControlCommand =
-  | { readonly type: "connect"; readonly url: string; readonly docId: string }
-  /** Simulate going offline / back online (the demo toggle). */
-  | { readonly type: "network"; readonly online: boolean };
+  /** Open the document (restoring it from IndexedDB) and optionally go online. */
+  | { readonly type: "connect"; readonly url: string; readonly docId: string; readonly online: boolean }
+  /** Go offline / back online (the demo toggle). */
+  | { readonly type: "network"; readonly online: boolean }
+  | { readonly type: "presence"; readonly presence: Presence };
 
 export type EngineCommand = EditCommand | ControlCommand;
 
@@ -52,4 +54,20 @@ export interface SyncEvent {
   readonly error?: string;
 }
 
-export type EngineEvent = PatchEvent | ErrorEvent | SyncEvent;
+/** What was recovered from IndexedDB when the document opened. */
+export interface RestoredEvent {
+  readonly type: "restored";
+  readonly resumed: boolean;
+  readonly shapes: number;
+  readonly pending: number;
+  readonly persistent: boolean;
+}
+
+export interface PresenceEvent {
+  readonly type: "presence";
+  readonly clientId: string;
+  /** null = they left. */
+  readonly presence: Presence | null;
+}
+
+export type EngineEvent = PatchEvent | ErrorEvent | SyncEvent | RestoredEvent | PresenceEvent;

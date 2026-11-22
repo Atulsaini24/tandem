@@ -35,6 +35,7 @@ export class Controller {
     this.#on(canvas, "pointermove", (e) => this.#move(e));
     this.#on(canvas, "pointerup", (e) => this.#up(e));
     this.#on(canvas, "pointercancel", (e) => this.#up(e));
+    this.#on(canvas, "pointerleave", () => this.#editor.updatePointer(null));
     this.#on(canvas, "wheel", (e) => this.#wheel(e), { passive: false });
     this.#on(canvas, "contextmenu", (e) => e.preventDefault());
     this.#onWindow("keydown", (e) => this.#keyDown(e));
@@ -93,6 +94,7 @@ export class Controller {
 
   #move(e: PointerEvent): void {
     const screen = this.#point(e);
+    this.#editor.updatePointer(this.#editor.renderer.screenToWorld(screen));
     const mode = this.#mode;
     switch (mode.kind) {
       case "pan":

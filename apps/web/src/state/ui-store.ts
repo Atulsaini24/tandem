@@ -39,17 +39,31 @@ export interface SyncUiState {
   readonly docId: string;
 }
 
+export interface Person {
+  readonly clientId: string;
+  readonly name: string;
+  readonly color: number;
+}
+
 interface UiState {
   readonly tool: Tool;
   readonly selection: ReadonlySet<NodeId>;
   readonly stats: Stats;
   readonly bench: BenchResult | "running" | undefined;
   readonly sync: SyncUiState;
+  /** Other people on this document (roster only; cursors are drawn by the canvas). */
+  readonly peers: readonly Person[];
+  readonly me: Omit<Person, "clientId"> | undefined;
+  /** A transient message, e.g. "Restored 3 unsynced edits". */
+  readonly notice: string | undefined;
   setTool(tool: Tool): void;
   setSelection(selection: ReadonlySet<NodeId>): void;
   setStats(stats: Partial<Stats>): void;
   setBench(bench: BenchResult | "running" | undefined): void;
   setSync(sync: Partial<SyncUiState>): void;
+  setPeers(peers: readonly Person[]): void;
+  setMe(me: Omit<Person, "clientId">): void;
+  setNotice(notice: string | undefined): void;
 }
 
 /**
@@ -63,7 +77,13 @@ export const useUiStore = create<UiState>()((set) => ({
   stats: { fps: 0, p95: 0, shapes: 0, zoom: 1, engineMs: 0 },
   bench: undefined,
   sync: { status: "offline", pending: 0, wantOnline: true, docId: "default" },
+  peers: [],
+  me: undefined,
+  notice: undefined,
   setTool: (tool) => set({ tool }),
+  setPeers: (peers) => set({ peers }),
+  setMe: (me) => set({ me }),
+  setNotice: (notice) => set({ notice }),
   setSync: (sync) => set((state) => ({ sync: { ...state.sync, ...sync } })),
   setSelection: (selection) => set({ selection }),
   setStats: (stats) => set((state) => ({ stats: { ...state.stats, ...stats } })),

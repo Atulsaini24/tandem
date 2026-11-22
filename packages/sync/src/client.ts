@@ -27,21 +27,40 @@ export interface SyncState {
   readonly error?: string;
 }
 
+/** A local delta waiting for the server's ACK. */
+export interface OutboxItem {
+  readonly clientSeq: number;
+  readonly bytes: Uint8Array;
+}
+
+/** Sync state restored from local storage, so a reload resumes instead of restarting. */
+export interface SyncResume {
+  readonly cursor: number;
+  readonly nextClientSeq: number;
+  readonly outbox: readonly OutboxItem[];
+}
+
+export interface RemoteDeltaInfo {
+  readonly serverSeq: number;
+  /** The exact bytes received, for persisting without re-encoding. */
+  readonly bytes: Uint8Array;
+}
+
 export interface SyncClientOptions {
   readonly url: string;
   readonly docId: string;
   readonly clientId: string;
   /** A delta from another client, to merge into the local document. */
-  readonly onDelta: (delta: DocDelta) => void;
+  readonly onDelta: (delta: DocDelta, info: RemoteDeltaInfo) => void;
   readonly onState?: (state: SyncState) => void;
+  /** The server durably stored every local delta up to `clientSeq`. */
+  readonly onAck?: (clientSeq: number, cursor: number) => void;
+  /** Another client's presence payload, or null when they leave. */
+  readonly onPresence?: (clientId: string, payload: Uint8Array | null) => void;
+  readonly initial?: SyncResume;
   readonly createSocket?: (url: string) => SocketLike;
   readonly minBackoffMs?: number;
   readonly maxBackoffMs?: number;
-}
-
-interface OutboxItem {
-  readonly clientSeq: number;
-  readonly bytes: Uint8Array;
 }
 
 function defaultSocket(url: string): SocketLike {
@@ -64,6 +83,9 @@ function toBytes(data: unknown): Uint8Array | undefined {
  *  - outbox: local deltas the server hasn't acknowledged. They are (re)sent on every
  *    connect; the server stores each (clientId, clientSeq) once, so a resend after a
  *    lost ACK is harmless. CRDT merge is idempotent anyway — this keeps the log clean.
+ *
+ * Both can be restored from storage (`initial`), so a page reload resumes exactly
+ * where the last session stopped, including edits made offline.
  *
  * Reconnects use exponential backoff with jitter, so a server restart doesn't get
  * hit by every client at the same instant.
@@ -90,15 +112,19 @@ export class SyncClient {
   #enabled = false;
   #status: SyncStatus = "offline";
   #error: string | undefined;
-  #cursor = 0;
-  #outbox: OutboxItem[] = [];
-  #nextClientSeq = 1;
+  #cursor: number;
+  #outbox: OutboxItem[];
+  #nextClientSeq: number;
+  #presence: Uint8Array | undefined;
   #attempt = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: SyncClientOptions) {
     this.#options = options;
     this.#createSocket = options.createSocket ?? defaultSocket;
+    this.#cursor = options.initial?.cursor ?? 0;
+    this.#outbox = [...(options.initial?.outbox ?? [])];
+    this.#nextClientSeq = options.initial?.nextClientSeq ?? 1;
   }
 
   get status(): SyncStatus {
@@ -133,13 +159,20 @@ export class SyncClient {
     this.#setStatus("offline");
   }
 
-  /** Queue a local delta and send it now if connected. */
-  push(delta: DocDelta): void {
-    if (delta.tree.length === 0 && delta.props.length === 0) return;
+  /** Queue a local delta, send it now if connected, and return it (for persistence). */
+  push(delta: DocDelta): OutboxItem | undefined {
+    if (delta.tree.length === 0 && delta.props.length === 0) return undefined;
     const item: OutboxItem = { clientSeq: this.#nextClientSeq++, bytes: encodeDelta(delta) };
     this.#outbox.push(item);
     if (this.#socketOpen) this.#sendPush(item);
     this.#emit();
+    return item;
+  }
+
+  /** Replace this client's presence. Sent now if connected, and again after every reconnect. */
+  setPresence(payload: Uint8Array): void {
+    this.#presence = payload;
+    if (this.#socketOpen) this.#send(encodeClientMessage({ type: "presence", payload }));
   }
 
   #connect(): void {
@@ -162,6 +195,7 @@ export class SyncClient {
         }),
       );
       for (const item of this.#outbox) this.#sendPush(item);
+      if (this.#presence) this.#send(encodeClientMessage({ type: "presence", payload: this.#presence }));
     };
     socket.onmessage = (event) => {
       if (this.#socket !== socket) return;
@@ -199,7 +233,9 @@ export class SyncClient {
           this.stats.duplicatesIgnored += 1; // already have it
           return;
         }
-        this.#options.onDelta(decodeDelta(message.delta));
+        // Merge first, then advance: if merging throws, the cursor stays put and the
+        // reconnect that follows fetches this delta again instead of skipping it.
+        this.#options.onDelta(decodeDelta(message.delta), { serverSeq: message.serverSeq, bytes: message.delta });
         this.#cursor = message.serverSeq;
         this.#emit();
         return;
@@ -207,7 +243,14 @@ export class SyncClient {
         // Pushes are processed in order, so an ACK covers every earlier clientSeq too.
         this.#outbox = this.#outbox.filter((item) => item.clientSeq > message.clientSeq);
         this.#cursor = Math.max(this.#cursor, message.serverSeq);
+        this.#options.onAck?.(message.clientSeq, this.#cursor);
         this.#emit();
+        return;
+      case "presence":
+        this.#options.onPresence?.(message.clientId, message.payload);
+        return;
+      case "leave":
+        this.#options.onPresence?.(message.clientId, null);
         return;
       case "error":
         if (message.fatal) {

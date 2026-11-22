@@ -4,5 +4,6 @@
     "customConditions": ["source"],
     "types": ["node"]
   },
-  "include": ["src", "test", "vitest.config.ts"]
+  // Server code only: no DOM types, so browser APIs can't slip into the server.
+  "include": ["src", "vitest.config.ts"]
 }

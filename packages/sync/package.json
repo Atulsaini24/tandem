@@ -10,6 +10,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./offline": {
+      "source": "./src/offline.ts",
+      "types": "./dist/offline.d.ts",
+      "default": "./dist/offline.js"
     }
   },
   "scripts": {
@@ -22,6 +27,7 @@
     "@canvas/doc": "workspace:*"
   },
   "devDependencies": {
+    "fake-indexeddb": "^6.0.0",
     "fast-check": "^4.1.0",
     "vitest": "^3.2.0"
   }

@@ -7,7 +7,7 @@
     "dev": "tsx watch --conditions=source src/main.ts",
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
@@ -19,6 +19,7 @@
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.0",
+    "fake-indexeddb": "^6.0.0",
     "fast-check": "^4.1.0",
     "tsx": "^4.20.0",
     "vitest": "^3.2.0"
