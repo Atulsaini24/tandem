@@ -10,6 +10,7 @@ import {
   hitTest,
   intersects,
   rectFromPoints,
+  quickConnectPoints,
   resizeBox,
   shapesInRect,
   visualBounds,
@@ -29,7 +30,8 @@ type Mode =
   | { kind: "box"; shape: "rect" | "ellipse" | "diamond" | "frame"; start: Point }
   | { kind: "arrow"; start: Point; from: NodeId | undefined }
   | { kind: "arrowEnd"; id: NodeId; end: "start" | "end"; group: number }
-  | { kind: "pen"; points: Point[] };
+  | { kind: "pen"; points: Point[] }
+  | { kind: "quick"; id: NodeId; side: "n" | "e" | "s" | "w"; start: Point };
 
 const TOOL_KEYS: Record<string, Tool> = {
   v: "select",
@@ -82,6 +84,8 @@ export class Controller {
   readonly #disposers: Array<() => void> = [];
   #mode: Mode = { kind: "idle" };
   #space = false;
+  /** The shape showing quick-connect handles. */
+  #qc: NodeId | undefined;
 
   constructor(canvas: HTMLCanvasElement, editor: Editor) {
     this.#canvas = canvas;
@@ -95,7 +99,15 @@ export class Controller {
     this.#on(canvas, "pointercancel", (e) => this.#up(e));
     this.#on(canvas, "pointerleave", () => this.#editor.updatePointer(null));
     this.#on(canvas, "wheel", (e) => this.#wheel(e), { passive: false });
-    this.#on(canvas, "contextmenu", (e) => e.preventDefault());
+    this.#on(canvas, "contextmenu", (e) => {
+      e.preventDefault();
+      const ui = useUiStore.getState();
+      if (ui.presenting) return;
+      const world = this.#editor.renderer.screenToWorld(this.#point(e));
+      const hit = this.#hit(world);
+      if (hit !== undefined && !ui.selection.has(hit)) this.#editor.select([hit]);
+      ui.setRadial({ x: e.clientX, y: e.clientY, target: hit });
+    });
     this.#on(canvas, "dblclick", (e) => this.#doubleClick(e));
     this.#onWindow("keydown", (e) => this.#keyDown(e));
     this.#onWindow("keyup", (e) => this.#keyUp(e));
@@ -153,6 +165,23 @@ export class Controller {
     return undefined;
   }
 
+  /** A quick-connect "+" under the pointer, for the shape currently showing them. */
+  #quickAt(world: Point): { id: NodeId; side: "n" | "e" | "s" | "w" } | undefined {
+    const id = this.#qc;
+    const shape = id === undefined ? undefined : this.#editor.scene.get(id);
+    if (!shape || id === undefined) return undefined;
+    const r = 13 / this.#zoom;
+    for (const { side, p } of quickConnectPoints(shape, this.#zoom)) {
+      if (Math.hypot(world.x - p.x, world.y - p.y) <= r) return { id, side };
+    }
+    return undefined;
+  }
+
+  #setQuick(id: NodeId | undefined): void {
+    this.#qc = id;
+    this.#editor.renderer.quickConnect = id;
+  }
+
   /** Edges of nearby shapes we can snap to (visible, not moving). */
   #snapTargets(moving: ReadonlySet<NodeId>): Rect[] {
     const view = this.#editor.renderer.visibleWorld;
@@ -182,6 +211,18 @@ export class Controller {
     }
     if (e.button !== 0) return;
     if (ui.editing) ui.setEditing(undefined);
+    if (ui.radial) ui.setRadial(undefined);
+    if (ui.presenting) return; // presenting: the pointer is a laser, not an editor
+    if (ui.voting && ui.tool === "select") {
+      const hit = this.#hit(world);
+      if (hit !== undefined) this.#editor.toggleVote(hit);
+      return;
+    }
+    const quick = ui.tool === "select" ? this.#quickAt(world) : undefined;
+    if (quick) {
+      this.#mode = { kind: "quick", id: quick.id, side: quick.side, start: world };
+      return;
+    }
 
     switch (ui.tool) {
       case "note":
@@ -278,6 +319,7 @@ export class Controller {
     this.#editor.updatePointer(world);
     const mode = this.#mode;
     const renderer = this.#editor.renderer;
+    if (mode.kind !== "idle" && mode.kind !== "quick" && this.#qc !== undefined) this.#setQuick(undefined);
     switch (mode.kind) {
       case "pan":
         renderer.panBy(screen.x - mode.last.x, screen.y - mode.last.y);
@@ -378,6 +420,14 @@ export class Controller {
         this.#editor.patchLocal([{ id: mode.id, patch: { ...arrowBox(a, b), [key]: target ?? "" } }], mode.group);
         return;
       }
+      case "quick": {
+        // Dragging off a "+" turns into drawing a connector from that shape.
+        if (Math.hypot(world.x - mode.start.x, world.y - mode.start.y) * this.#zoom > 8) {
+          this.#mode = { kind: "arrow", start: mode.start, from: mode.id };
+          this.#setQuick(undefined);
+        }
+        return;
+      }
       case "pen": {
         const last = mode.points[mode.points.length - 1];
         if (!last || Math.hypot(world.x - last.x, world.y - last.y) * this.#zoom >= 1.5) mode.points.push(world);
@@ -421,6 +471,10 @@ export class Controller {
         useUiStore.getState().setTool("select");
         break;
       }
+      case "quick":
+        this.#setQuick(undefined);
+        this.#editor.quickConnect(mode.id, mode.side);
+        break;
       case "pen":
         this.#editor.createPath(mode.points.length === 1 && mode.points[0] ? [mode.points[0], { x: mode.points[0].x + 0.5, y: mode.points[0].y + 0.5 }] : mode.points);
         break;
@@ -473,7 +527,7 @@ export class Controller {
       ui.setPaletteOpen(!ui.paletteOpen);
       return;
     }
-    if (ui.paletteOpen) return;
+    if (ui.paletteOpen || ui.presenting) return;
     if (e.key === " ") {
       e.preventDefault();
       if (!this.#space && this.#mode.kind === "idle") this.#cursor("grab");
@@ -558,9 +612,29 @@ export class Controller {
     if (tool === "pen") return this.#cursor("crosshair");
     if (tool !== "select") return this.#cursor("crosshair");
     const world = this.#editor.renderer.screenToWorld(screen);
+    const ui = useUiStore.getState();
+    if (ui.presenting) return this.#cursor(ui.laser ? "none" : "default");
+    if (ui.voting) return this.#cursor(this.#hit(world) === undefined ? "default" : "pointer");
+    if (this.#quickAt(world)) return this.#cursor("copy");
     const handle = this.#handleAt(world);
-    if (handle) return this.#cursor(HANDLE_CURSORS[handle.id] ?? "default");
-    this.#cursor(this.#hit(world) === undefined ? "default" : "move");
+    if (handle) {
+      this.#setQuick(undefined);
+      return this.#cursor(HANDLE_CURSORS[handle.id] ?? "default");
+    }
+    const hit = this.#hit(world);
+    const shape = hit === undefined ? undefined : this.#editor.scene.get(hit);
+    this.#setQuick(shape && quickConnectPoints(shape, this.#zoom).length > 0 ? hit : this.#nearQuick(world));
+    this.#cursor(hit === undefined ? "default" : "move");
+  }
+
+  /** Keep the handles while the pointer travels from the shape to a "+". */
+  #nearQuick(world: Point): NodeId | undefined {
+    const id = this.#qc;
+    const shape = id === undefined ? undefined : this.#editor.scene.get(id);
+    if (!shape) return undefined;
+    const pad = 44 / this.#zoom;
+    const inside = world.x > shape.x - pad && world.x < shape.x + shape.w + pad && world.y > shape.y - pad && world.y < shape.y + shape.h + pad;
+    return inside ? id : undefined;
   }
 
   #cursor(cursor: string): void {

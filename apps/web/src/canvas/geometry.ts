@@ -274,3 +274,19 @@ export function resizeBox(box: Rect, rotation: number, id: HandleId, p: Point, k
   const anchorAfter = rotate({ x: ax, y: ay }, nc, rotation);
   return { x: x0 + anchorBefore.x - anchorAfter.x, y: y0 + anchorBefore.y - anchorAfter.y, w, h };
 }
+
+/** Quick-connect "+" handles: just outside the middle of each side (rotation included). */
+export const QUICK_CONNECT_KINDS = new Set(["rect", "ellipse", "diamond"]);
+export function quickConnectPoints(s: ShapeView, zoom: number): Array<{ side: "n" | "e" | "s" | "w"; p: Point }> {
+  if (!QUICK_CONNECT_KINDS.has(s.kind)) return [];
+  const c = center(s);
+  const off = 26 / zoom;
+  const r = s.rotation ?? 0;
+  const pts: Array<{ side: "n" | "e" | "s" | "w"; p: Point }> = [
+    { side: "n", p: { x: c.x, y: s.y - off } },
+    { side: "e", p: { x: s.x + s.w + off, y: c.y } },
+    { side: "s", p: { x: c.x, y: s.y + s.h + off } },
+    { side: "w", p: { x: s.x - off, y: c.y } },
+  ];
+  return pts.map(({ side, p }) => ({ side, p: rotate(p, c, r) }));
+}

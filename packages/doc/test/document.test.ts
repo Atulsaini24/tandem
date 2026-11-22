@@ -184,3 +184,30 @@ describe("rich shapes", () => {
     expect(() => doc.updateShapes([{ id: "a", patch: { rotation: Number.NaN } }])).toThrow(RangeError);
   });
 });
+
+describe("team rituals", () => {
+  it("concurrent votes from different people all count, and toggle off", () => {
+    const alice = new CanvasDocument("alice");
+    const bob = new CanvasDocument("bob");
+    alice.createShapes([{ id: "n", props: rect() }]);
+    bob.merge(alice.state);
+    const a = alice.vote("n", "alice", true);
+    const b = bob.vote("n", "bob", true);
+    alice.merge(b);
+    bob.merge(a);
+    expect(alice.shape("n")?.voters).toEqual(["alice", "bob"]);
+    expect(bob.shape("n")).toEqual(alice.shape("n"));
+    alice.merge(bob.vote("n", "bob", false));
+    expect(alice.shape("n")?.voters).toEqual(["alice"]);
+    expect(alice.vote("missing", "alice", true)).toEqual({ tree: [], props: [] });
+  });
+
+  it("the shared timer syncs through board meta", () => {
+    const alice = new CanvasDocument("alice");
+    const bob = new CanvasDocument("bob");
+    bob.merge(alice.setMeta({ timerEnd: 1_000_000, timerTotal: 300_000 }));
+    bob.merge(alice.setTitle("Retro"));
+    expect(bob.meta).toEqual({ title: "Retro", timerEnd: 1_000_000, timerTotal: 300_000, timerPaused: undefined });
+    expect(() => alice.setMeta({ timerEnd: -1 })).toThrow(RangeError);
+  });
+});

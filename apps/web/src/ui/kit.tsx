@@ -5,7 +5,8 @@ export const spring = { type: "spring", stiffness: 420, damping: 34 } as const;
 export const softSpring = { type: "spring", stiffness: 260, damping: 30 } as const;
 
 /** Floating glass panel used for every piece of chrome on the board. */
-export const panel = "rounded-2xl border border-edge bg-paper/90 shadow-[0_12px_32px_rgba(25,29,37,0.10)] backdrop-blur-md";
+export const panel =
+  "rounded-2xl border border-white/60 bg-paper/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_18px_44px_rgba(25,29,37,0.14)] backdrop-blur-2xl backdrop-saturate-150 dark:border-white/10 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_18px_44px_rgba(0,0,0,0.45)]";
 
 export const MOD = typeof navigator !== "undefined" && navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl+";
 

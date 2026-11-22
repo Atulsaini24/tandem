@@ -11,7 +11,12 @@ import { Minimap } from "../ui/Minimap";
 import { Notice } from "../ui/Presence";
 import { ShareDialog } from "../ui/ShareDialog";
 import { StyleBar } from "../ui/StyleBar";
+import { PresentMode } from "../ui/PresentMode";
+import { RadialMenu } from "../ui/RadialMenu";
+import { RitualsPanel, TimerPill } from "../ui/Rituals";
 import { Toolbar } from "../ui/Toolbar";
+import { Tour } from "../ui/Tour";
+import { useUiStore } from "../state/ui-store";
 import { TopBar } from "../ui/TopBar";
 
 /** One board: the canvas plus all of its chrome. */
@@ -20,6 +25,7 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
   const [editor, setEditor] = useState<Editor | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const { docId, token, viewMode, template } = route;
+  const presenting = useUiStore((s) => s.presenting !== undefined);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -41,21 +47,32 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
   return (
     <div className="relative h-full w-full select-none overflow-hidden bg-canvas">
       <div ref={hostRef} className="absolute inset-0" />
+      {!presenting && (
+        <div className="pointer-events-none absolute inset-0">
+          <TopBar editor={editor} onShare={() => setShareOpen(true)} />
+          <StyleBar editor={editor} />
+          <EmptyState editor={editor} />
+          <Toolbar editor={editor} />
+          <Minimap editor={editor} />
+          <Hud />
+        </div>
+      )}
       <div className="pointer-events-none absolute inset-0">
-        <TopBar editor={editor} onShare={() => setShareOpen(true)} />
-        <StyleBar editor={editor} />
-        <EmptyState editor={editor} />
-        <Toolbar editor={editor} />
-        <Minimap editor={editor} />
-        <Hud />
+        <TimerPill editor={editor} />
         <Notice />
       </div>
       <LabelEditor editor={editor} />
       <CursorChat editor={editor} />
-      <div className="pointer-events-none absolute inset-0">
-        <AiPanel editor={editor} />
-        <HistoryPanel editor={editor} />
-      </div>
+      {!presenting && (
+        <div className="pointer-events-none absolute inset-0">
+          <AiPanel editor={editor} />
+          <HistoryPanel editor={editor} />
+          <RitualsPanel editor={editor} />
+        </div>
+      )}
+      <PresentMode editor={editor} />
+      <RadialMenu editor={editor} />
+      <Tour ready={editor !== null} />
       <CommandPalette editor={editor} />
       <ShareDialog editor={editor} open={shareOpen} onClose={() => setShareOpen(false)} />
     </div>

@@ -5,8 +5,9 @@ import type { EngineEvent } from "../engine/protocol";
 import { useUiStore, type BenchResult } from "../state/ui-store";
 import { AiRunner } from "./ai-runner";
 import { Controller } from "./controller";
+import { CrowdSim } from "./crowd";
 import { download, safeFilename, svgToPng, toSvg } from "./export";
-import { arrowBox, boundsOf, boundsOfPoints, center, containsRect, visualBounds, type Rect } from "./geometry";
+import { arrowBox, boundsOf, boundsOfPoints, center, containsRect, intersects, visualBounds, type Rect } from "./geometry";
 import { loadIdentity } from "./identity";
 import { Peers } from "./peers";
 import { Renderer } from "./renderer";
@@ -23,6 +24,7 @@ const FRAME_WINDOW = 120;
 const PRESENCE_INTERVAL_MS = 40;
 const REGISTRY_INTERVAL_MS = 2_000;
 const CLIPBOARD_TAG = "canvas/shapes@1";
+export const VOTES_PER_PERSON = 5;
 
 export interface BoardTarget {
   readonly docId: string;
@@ -116,6 +118,7 @@ export class Editor {
   readonly #seenReactions = new Map<string, number>();
 
   #clipboard: { shapes: ShapeView[]; pastes: number } | undefined;
+  #crowd: CrowdSim | undefined;
   #registryTimer: ReturnType<typeof setTimeout> | undefined;
   #restored = false;
 
@@ -144,6 +147,7 @@ export class Editor {
         if (state.chat !== previous.chat) this.#schedulePresence();
       }),
     );
+    this.renderer.voter = this.#me.id;
     this.#controller = new Controller(this.renderer.app.canvas, this);
     this.renderer.frameListeners.add((dt) => this.#onFrame(dt));
     document.addEventListener("visibilitychange", this.#onHidden);
@@ -189,6 +193,7 @@ export class Editor {
     this.#flush();
     this.#saveRegistry();
     this.ai.cancel();
+    this.#crowd?.stop();
     clearTimeout(this.#flushTimer);
     clearTimeout(this.#presenceTimer);
     clearTimeout(this.#registryTimer);
@@ -235,6 +240,7 @@ export class Editor {
   /** Where this user's pointer is, in world coordinates (null = off the canvas). */
   updatePointer(world: Point | null): void {
     this.#pointer = world;
+    if (world && useUiStore.getState().laser) this.renderer.addLaserPoint("me", world, this.#me.color);
     this.#schedulePresence();
   }
 
@@ -673,6 +679,162 @@ export class Editor {
     this.#schedulePresence();
   }
 
+  // --- team rituals ------------------------------------------------------------------
+
+  /** This browser's voter key. */
+  get voterId(): string {
+    return this.#me.id;
+  }
+
+  /** How many votes I've cast on this board (each person gets VOTES_PER_PERSON). */
+  myVotes(): number {
+    let n = 0;
+    for (const s of this.scene.ordered()) if (s.voters?.includes(this.#me.id)) n += 1;
+    return n;
+  }
+
+  /** Toggle my dot vote on a shape. Returns false when out of votes. */
+  toggleVote(id: NodeId): boolean {
+    const shape = this.scene.get(id);
+    if (!shape || this.locked || shape.kind === "arrow" || shape.kind === "frame") return false;
+    const on = !(shape.voters ?? []).includes(this.#me.id);
+    if (on && this.myVotes() >= VOTES_PER_PERSON) {
+      useUiStore.getState().setNotice(`You've used all ${VOTES_PER_PERSON} votes — click a voted note to take one back`);
+      return false;
+    }
+    const voters = on ? [...(shape.voters ?? []), this.#me.id].sort() : (shape.voters ?? []).filter((v) => v !== this.#me.id);
+    this.scene.updateLocal([{ id, patch: { voters } as Partial<ShapeProps> }], this.engine.nextSeq());
+    this.engine.send({ type: "vote", seq: this.engine.nextSeq(), id, voter: this.#me.id, on });
+    this.renderer.pulse(id);
+    return true;
+  }
+
+  /** Start (or restart) the shared countdown for everyone on the board. */
+  startTimer(ms: number): void {
+    if (this.locked) return;
+    this.engine.send({ type: "meta", seq: this.engine.nextSeq(), meta: { timerEnd: Date.now() + ms, timerTotal: ms, timerPaused: 0 } });
+  }
+
+  pauseTimer(): void {
+    const { end, paused } = useUiStore.getState().timer;
+    if (!end || paused) return;
+    this.engine.send({ type: "meta", seq: this.engine.nextSeq(), meta: { timerPaused: Math.max(1, end - Date.now()) } });
+  }
+
+  resumeTimer(): void {
+    const { paused } = useUiStore.getState().timer;
+    if (!paused) return;
+    this.engine.send({ type: "meta", seq: this.engine.nextSeq(), meta: { timerEnd: Date.now() + paused, timerPaused: 0 } });
+  }
+
+  addTime(ms: number): void {
+    const { end, total, paused } = useUiStore.getState().timer;
+    if (!end) return this.startTimer(ms);
+    this.engine.send({ type: "meta", seq: this.engine.nextSeq(), meta: paused ? { timerPaused: paused + ms, timerTotal: total + ms } : { timerEnd: end + ms, timerTotal: total + ms } });
+  }
+
+  stopTimer(): void {
+    this.engine.send({ type: "meta", seq: this.engine.nextSeq(), meta: { timerEnd: 0, timerTotal: 0, timerPaused: 0 } });
+  }
+
+  /** Ask everyone to follow my view (they can step away by moving). */
+  setSpotlight(on: boolean): void {
+    useUiStore.getState().setSpotlight(on);
+    if (on) useUiStore.getState().setNotice("Spotlight on: everyone is following your view");
+    this.#schedulePresence();
+  }
+
+  setLaser(on: boolean): void {
+    useUiStore.getState().setLaser(on);
+    this.renderer.laserOn = on;
+    this.#schedulePresence();
+  }
+
+  // --- present mode ------------------------------------------------------------------
+
+  /** Frames as slides, in reading order (top to bottom, then left to right). */
+  slides(): NodeId[] {
+    return this.scene
+      .ordered()
+      .filter((s) => s.kind === "frame")
+      .sort((a, b) => (Math.abs(a.y - b.y) > 120 ? a.y - b.y : a.x - b.x))
+      .map((s) => s.id);
+  }
+
+  startPresenting(): void {
+    const slides = this.slides();
+    this.select([]);
+    useUiStore.getState().setEditing(undefined);
+    useUiStore.getState().setPresenting({ slides, index: 0 });
+    this.setSpotlight(true);
+    this.#showSlide(0, slides);
+  }
+
+  goToSlide(index: number): void {
+    const presenting = useUiStore.getState().presenting;
+    if (!presenting) return;
+    const count = Math.max(1, presenting.slides.length);
+    const next = Math.min(count - 1, Math.max(0, index));
+    useUiStore.getState().setPresenting({ ...presenting, index: next });
+    this.#showSlide(next, presenting.slides);
+  }
+
+  stopPresenting(): void {
+    useUiStore.getState().setPresenting(undefined);
+    this.setSpotlight(false);
+    this.setLaser(false);
+  }
+
+  #showSlide(index: number, slides: readonly NodeId[]): void {
+    const id = slides[index];
+    const frame = id ? this.scene.get(id) : undefined;
+    const target = frame ? visualBounds(frame, this.lookup) : boundsOf(this.scene.ordered().map((s) => visualBounds(s, this.lookup)));
+    if (target) this.renderer.fitTo(target, 60, 0, 4, 1100, true);
+  }
+
+  // --- quick-connect -------------------------------------------------------------------
+
+  /** Create the next step beside a shape, already connected to it, and start typing. */
+  quickConnect(id: NodeId, side: "n" | "e" | "s" | "w"): void {
+    const source = this.scene.get(id);
+    if (!source || this.locked) return;
+    const gap = 110;
+    const w = source.w;
+    const h = source.h;
+    const dx = side === "e" ? w + gap : side === "w" ? -(w + gap) : 0;
+    const dy = side === "s" ? h + gap : side === "n" ? -(h + gap) : 0;
+    let x = source.x + dx;
+    let y = source.y + dy;
+    // Step past anything already there, so the new step never lands on top of another.
+    const others = this.scene.ordered().filter((s) => s.kind !== "arrow" && s.kind !== "frame").map((s) => visualBounds(s, this.lookup));
+    const pad = 20;
+    for (let i = 0; i < 12 && others.some((b) => intersects(b, { x: x - pad, y: y - pad, w: w + pad * 2, h: h + pad * 2 })); i++) {
+      x += dx;
+      y += dy;
+    }
+    const kind = source.kind === "ellipse" || source.kind === "diamond" || source.kind === "rect" ? (source.kind === "ellipse" ? "rect" : source.kind) : "rect";
+    const group = this.beginGroup();
+    const props: ShapeProps = { kind: kind === "diamond" ? "rect" : kind, x, y, w, h, fill: source.fill, label: " " };
+    const [next] = this.#create([{ props }], group, true);
+    if (!next) return;
+    this.#create([{ props: { kind: "arrow", x: 0, y: 0, w: 1, h: 1, fill: INK, points: "0,0 1,1", from: id, to: next } }], group);
+    this.select([next]);
+    this.startEditing(next);
+  }
+
+  /** Simulated teammates (bots) for demos: see crowd.ts. */
+  get crowd(): CrowdSim {
+    this.#crowd ??= new CrowdSim(this);
+    return this.#crowd;
+  }
+
+  /** A shape created by a bot teammate (pops in; its own undo step). */
+  botCreate(props: ShapeProps): NodeId | undefined {
+    const [id] = this.#create([{ props }], this.beginGroup());
+    if (id) this.renderer.pulse(id);
+    return id;
+  }
+
   // --- export ------------------------------------------------------------------------
 
   #exportSource(): ShapeView[] {
@@ -893,6 +1055,8 @@ export class Editor {
           ...(view ? { view } : {}),
           ...(ui.chat ? { chat: ui.chat } : {}),
           ...(this.#reaction ? { reaction: this.#reaction } : {}),
+          ...(ui.spotlight ? { spotlight: true } : {}),
+          ...(ui.laser ? { laser: true } : {}),
         },
       });
     }, PRESENCE_INTERVAL_MS);
@@ -928,6 +1092,7 @@ export class Editor {
       }
       case "title":
         ui.setTitle(event.title);
+        ui.setTimer({ end: event.meta.timerEnd ?? 0, total: event.meta.timerTotal ?? 0, paused: event.meta.timerPaused ?? 0 });
         if (event.title) upsertBoard(this.docId, { title: event.title });
         return;
       case "error":
@@ -979,6 +1144,15 @@ export class Editor {
         }
         if (!event.presence) {
           this.#seenReactions.delete(event.clientId);
+          if (ui.following === event.clientId) ui.setFollowing(undefined);
+        }
+        // Someone asks everyone to follow them: do, unless we're presenting ourselves.
+        if (event.presence?.spotlight && !ui.spotlight && ui.spotlightBy !== event.clientId) {
+          ui.setSpotlightBy(event.clientId);
+          ui.setFollowing(event.clientId);
+          ui.setNotice(`${event.presence.name} is presenting — you're following their view`);
+        } else if (ui.spotlightBy === event.clientId && !event.presence?.spotlight) {
+          ui.setSpotlightBy(undefined);
           if (ui.following === event.clientId) ui.setFollowing(undefined);
         }
         if (this.peers.update(event.clientId, event.presence)) {

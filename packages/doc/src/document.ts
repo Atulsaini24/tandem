@@ -58,7 +58,22 @@ export interface ShapeProps {
 
 export interface ShapeView extends ShapeProps {
   readonly id: NodeId;
+  /** Dot votes: who voted for this shape (read-only view; see CanvasDocument.vote). */
+  readonly voters?: readonly string[];
 }
+
+/** Board-wide settings that sync like any property (see CanvasDocument.meta). */
+export interface BoardMeta {
+  readonly title?: string;
+  /** Shared countdown: when it ends (epoch ms), or 0 when stopped. */
+  readonly timerEnd?: number;
+  /** Shared countdown: its full length (ms), for the progress ring. */
+  readonly timerTotal?: number;
+  /** Shared countdown: remaining ms while paused (0 = not paused). */
+  readonly timerPaused?: number;
+}
+const META_KEYS = ["title", "timerEnd", "timerTotal", "timerPaused"] as const;
+export const VOTE_PREFIX = "v:";
 
 export type PropValue = string | number;
 export type PropsDelta = ReadonlyArray<readonly [NodeId, LWWMapState<PropValue>]>;
@@ -166,6 +181,8 @@ function readShape(id: NodeId, props: LWWMap<PropValue>): ShapeView | undefined 
   const kind = props.get("kind");
   const [x, y, w, h, fill] = (["x", "y", "w", "h", "fill"] as const).map((key) => props.get(key));
   if (typeof kind !== "string" || !(SHAPE_KINDS as readonly string[]).includes(kind)) return undefined;
+  const voters: string[] = [];
+  for (const [key, value] of props.entries()) if (key.startsWith(VOTE_PREFIX) && value === 1) voters.push(key.slice(VOTE_PREFIX.length));
   if (typeof x !== "number" || typeof y !== "number") return undefined;
   if (typeof w !== "number" || typeof h !== "number" || typeof fill !== "number") return undefined;
   const view: Record<string, PropValue> = { id, kind, x, y, w, h, fill };
@@ -173,6 +190,7 @@ function readShape(id: NodeId, props: LWWMap<PropValue>): ShapeView | undefined 
     const value = props.get(key);
     if (value !== undefined && value !== empty && typeof value === typeof empty) view[key] = value;
   }
+  if (voters.length > 0) (view as Record<string, unknown>).voters = voters.sort();
   return view as unknown as ShapeView;
 }
 
@@ -252,6 +270,43 @@ export class CanvasDocument {
   setTitle(title: string): DocDelta {
     const clean = Array.from(title.replace(/\s+/g, " ").trim()).slice(0, MAX_TITLE_CHARS).join("");
     return { tree: [], props: [[META_ID, this.#propsOf(META_ID).set("title", clean)]] };
+  }
+
+  /** Board settings (title, shared timer). */
+  get meta(): BoardMeta {
+    const map = this.#props.get(META_ID);
+    const out: Record<string, PropValue> = {};
+    if (map) for (const key of META_KEYS) {
+      const value = map.get(key);
+      if (value !== undefined && value !== "" ) out[key] = value;
+    }
+    return out as BoardMeta;
+  }
+
+  /** Change board settings. Numbers must be finite and non-negative; title goes through setTitle. */
+  setMeta(patch: Omit<BoardMeta, "title">): DocDelta {
+    const map = this.#propsOf(META_ID);
+    const delta = new Map<string, LWWMapEntry<PropValue>>();
+    for (const key of META_KEYS) {
+      if (key === "title") continue;
+      const value = patch[key];
+      if (value === undefined) continue;
+      if (!Number.isFinite(value) || value < 0) throw new RangeError(`${key} must be a non-negative number`);
+      for (const [k, entry] of map.set(key, value)) delta.set(k, entry);
+    }
+    return { tree: [], props: [[META_ID, delta]] };
+  }
+
+  /**
+   * Dot voting. Each voter writes their OWN key on the shape (v:<voter>), so two people
+   * voting at the same moment both count: there's no shared counter to fight over.
+   * Not an undo step (a vote is toggled back by voting again).
+   */
+  vote(id: NodeId, voter: string, on: boolean): DocDelta {
+    if (!this.#props.has(id) || id === META_ID) return EMPTY_DELTA;
+    const clean = Array.from(voter).slice(0, 40).join("");
+    if (!clean) throw new RangeError("voter must be a non-empty string");
+    return { tree: [], props: [[id, this.#propsOf(id).set(`${VOTE_PREFIX}${clean}`, on ? 1 : 0)]] };
   }
 
   /** Only the ops a given replica authored (for re-seeding a server that lost data). */

@@ -20,6 +20,10 @@ export interface Presence {
   readonly chat?: string;
   /** The latest emoji reaction; `n` changes with every new one so repeats still show. */
   readonly reaction?: { readonly emoji: string; readonly n: number };
+  /** Asking everyone to follow this person's view (present mode, "spotlight me"). */
+  readonly spotlight?: boolean;
+  /** The cursor is a laser pointer (drawn with a glowing trail on every screen). */
+  readonly laser?: boolean;
 }
 
 export const MAX_PRESENCE_NAME = 40;
@@ -28,6 +32,8 @@ const MAX_EMOJI = 16;
 const VIEW = 1;
 const CHAT = 2;
 const REACTION = 4;
+const SPOTLIGHT = 8;
+const LASER = 16;
 export const MAX_PRESENCE_SELECTION = 200;
 
 export function encodePresence(presence: Presence): Uint8Array {
@@ -48,7 +54,7 @@ export function encodePresence(presence: Presence): Uint8Array {
   const view = presence.view && [presence.view.x, presence.view.y, presence.view.w, presence.view.h].every(Number.isFinite) ? presence.view : undefined;
   const chat = presence.chat ? Array.from(presence.chat).slice(0, MAX_PRESENCE_CHAT).join("") : "";
   const reaction = presence.reaction && presence.reaction.emoji ? presence.reaction : undefined;
-  const flags = (view ? VIEW : 0) | (chat ? CHAT : 0) | (reaction ? REACTION : 0);
+  const flags = (view ? VIEW : 0) | (chat ? CHAT : 0) | (reaction ? REACTION : 0) | (presence.spotlight ? SPOTLIGHT : 0) | (presence.laser ? LASER : 0);
   if (flags !== 0) {
     w.byte(flags);
     if (view) for (const v of [view.x, view.y, view.w, view.h]) w.f64(v);
@@ -85,7 +91,9 @@ export function decodePresence(bytes: Uint8Array): Presence {
   const presence: { -readonly [K in keyof Presence]: Presence[K] } = { name, color, cursor, selection };
   if (r.remaining > 0) {
     const flags = r.byte();
-    if (flags & ~(VIEW | CHAT | REACTION)) throw new DecodeError("bad presence flags");
+    if (flags & ~(VIEW | CHAT | REACTION | SPOTLIGHT | LASER)) throw new DecodeError("bad presence flags");
+    if (flags & SPOTLIGHT) presence.spotlight = true;
+    if (flags & LASER) presence.laser = true;
     if (flags & VIEW) {
       const [x, y, w, h] = [r.f64(), r.f64(), r.f64(), r.f64()];
       if (![x, y, w, h].every(Number.isFinite)) throw new DecodeError("presence view not finite");

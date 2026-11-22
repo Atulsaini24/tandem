@@ -27,10 +27,12 @@ links, and an AI that runs on your own machine.
 
 | Area | What you can do |
 |---|---|
-| **Homepage** (`/`) | A scroll story: a live canvas builds itself as you scroll (drawing, live collaboration, offline, conflict-free merge, time travel, local AI), then a stats band, feature grid and an architecture diagram that draws itself |
+| **Homepage** (`/`) | A cinematic 3D scroll story (Three.js + GSAP ScrollTrigger + Lenis, bloom): the camera flies through a living board while eight named cursors work on it — notes assemble, get dragged into a mind map, the board splits into two offline devices and merges with a shockwave, rewinds inside a clock ring, and AI cards stream out of a glowing orb |
 | **Dashboard** (`/boards`) | Your boards with thumbnails, search, star, join by link; start blank or from a template (kanban, retro, flowchart, mind map, brainstorm) |
 | **Editing** | Notes, rectangles, ellipses, diamonds, text, frames, pen, comments; **connectors that stay attached**; resize and rotate handles; snapping with alignment guides; align and distribute; copy, paste (text becomes a note), duplicate, Alt-drag to copy; frames carry their contents; wrap a selection in a frame; nudge with arrow keys; minimap and zoom controls; **⌘K command palette** for everything |
-| **Together** | Live cursors and selections, **cursor chat** (`/`), **emoji reactions** (1–6), **follow a teammate's view** (click their avatar), live text as people type, synced board name |
+| **Together** | Live cursors and selections, **cursor chat** (`/`), **emoji reactions** (1–6), **follow a teammate's view** (click their avatar), live text as people type, synced board name, **simulate a team** (8 live bot teammates) |
+| **Rituals & presenting** | **Present mode** (frames become slides, cinematic camera, everyone follows), **laser pointer** with a glowing trail, **spotlight**, **dot voting** (5 each, concurrency-safe), a **shared timer** with chime and confetti |
+| **Flow** | **Quick-connect** + handles on hover, **radial right-click menu**, springy pop animations, first-visit **guided tour** |
 | **Offline & history** | Works with no connection (edits queue on the device and merge later), selective undo (only your own edits), **time travel** slider with restore |
 | **Share & export** | Edit and view-only links (server-signed when auth is on), **PNG / SVG / PDF** export of the board or the selection |
 | **AI (local)** | Create a board, **draw a flowchart or mind map with real connectors**, organize notes into columns, **summarize the board and list what's missing** |

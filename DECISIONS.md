@@ -515,3 +515,30 @@ or, failing that, the node whose label matches; and mind maps use a nested schem
 (center → branches → ideas) whose edges the reader creates itself, so they can't be
 mis-wired. After: PR flowchart 13 nodes / 13 edges / 0 unconnected; mind maps 17 nodes /
 16 edges / 0 rejected.
+
+## D059 — The homepage story is a pure function of scroll position
+The 3D homepage (Three.js via React Three Fiber, bloom/vignette post-processing) is driven
+by one number: scroll progress in chapter units, read from GSAP ScrollTrigger and smoothed
+by Lenis. Every note, cursor, connector, camera pose and effect is a pure function of that
+number (`pages/home/story.ts`), so scrolling backwards replays the story in reverse and
+nothing depends on scroll speed or history. The scene is its own lazy chunk (~305 kB gzip)
+loaded after the hero text is on screen; without WebGL the page shows a gradient instead.
+
+## D060 — Votes are one LWW key per voter, the timer is board meta
+A shared vote counter would lose votes when two people vote at once (last writer wins).
+Each voter writes their own key on the shape (`v:<voter>`), so concurrent votes all
+count and the badge is just the number of keys set to 1. The shared countdown is three
+numbers in the board's metadata map (end time, total, paused remainder), so every
+client renders the same clock without a timer service on the server.
+
+## D061 — Present mode, spotlight and laser ride on presence
+Presenting turns frames into slides and flies the camera between them (an arcing flight
+that pulls back mid-way). Spotlight and laser are two flag bits in presence (D055), so
+"everyone follow me" and the red trail need no new message types and vanish when the
+presenter disconnects. A follower who moves their own view stops following.
+
+## D062 — The simulated team uses the real paths
+"Simulate a team" adds eight bots as entries in Peers and edits through the editor's own
+methods, so their cursors, selections, chat, reactions, votes and edits exercise exactly
+the code real collaborators do, and sync to other tabs. Limits keep it readable: at most
+36 bot shapes and 8 connectors, each between near neighbours.

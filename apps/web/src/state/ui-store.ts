@@ -84,6 +84,31 @@ interface UiState {
   readonly chat: string | undefined;
   /** Fill for new shapes (the style bar's last pick). */
   readonly fill: number;
+  /** Dot voting is on: clicking a shape toggles your vote. */
+  readonly voting: boolean;
+  /** The synced countdown (from board meta). */
+  readonly timer: { readonly end: number; readonly total: number; readonly paused: number };
+  /** Present mode: the frame ids in slide order and which one is showing. */
+  readonly presenting: { readonly slides: readonly NodeId[]; readonly index: number } | undefined;
+  readonly laser: boolean;
+  /** I'm asking everyone to follow me. */
+  readonly spotlight: boolean;
+  /** Someone else is spotlighting (their client id), and we're following them. */
+  readonly spotlightBy: string | undefined;
+  /** Radial menu at a screen point, for a shape or for empty canvas. */
+  readonly radial: { readonly x: number; readonly y: number; readonly target: NodeId | undefined } | undefined;
+  /** The simulated team (bots) is running. */
+  readonly crowd: boolean;
+  readonly ritualsOpen: boolean;
+  setVoting(voting: boolean): void;
+  setTimer(timer: { end: number; total: number; paused: number }): void;
+  setPresenting(presenting: { slides: readonly NodeId[]; index: number } | undefined): void;
+  setLaser(laser: boolean): void;
+  setSpotlight(spotlight: boolean): void;
+  setSpotlightBy(clientId: string | undefined): void;
+  setRadial(radial: { x: number; y: number; target: NodeId | undefined } | undefined): void;
+  setCrowd(crowd: boolean): void;
+  setRitualsOpen(open: boolean): void;
   /** Keys typed after "start editing" but before the text box appeared (not lost). */
   readonly editBuffer: string;
   setEditBuffer(editBuffer: string): void;
@@ -141,6 +166,24 @@ export const useUiStore = create<UiState>()((set) => ({
   chat: undefined,
   fill: 0x2f63ff,
   editBuffer: "",
+  voting: false,
+  timer: { end: 0, total: 0, paused: 0 },
+  presenting: undefined,
+  laser: false,
+  spotlight: false,
+  spotlightBy: undefined,
+  radial: undefined,
+  crowd: false,
+  ritualsOpen: false,
+  setVoting: (voting) => set({ voting }),
+  setTimer: (timer) => set({ timer }),
+  setPresenting: (presenting) => set({ presenting }),
+  setLaser: (laser) => set({ laser }),
+  setSpotlight: (spotlight) => set({ spotlight }),
+  setSpotlightBy: (spotlightBy) => set({ spotlightBy }),
+  setRadial: (radial) => set({ radial }),
+  setCrowd: (crowd) => set({ crowd }),
+  setRitualsOpen: (ritualsOpen) => set({ ritualsOpen }),
   setEditBuffer: (editBuffer) => set({ editBuffer }),
   setTitle: (title) => set({ title }),
   setViewMode: (viewMode) => set({ viewMode }),

@@ -36,7 +36,9 @@ function ToolButton({ tool, disabled }: { tool: (typeof TOOLS)[number]; disabled
       <motion.span className={`relative ${active ? "text-paper" : ""}`} whileHover={{ y: -1.5 }} transition={spring}>
         <Icon name={tool.icon} />
       </motion.span>
-      <span className="pointer-events-none absolute -top-1 right-0.5 font-mono text-[8px] font-bold text-muted opacity-0 transition-opacity group-hover:opacity-100">{tool.key}</span>
+      <span className="pointer-events-none absolute -top-11 left-1/2 z-10 -translate-x-1/2 translate-y-1 whitespace-nowrap rounded-lg bg-ink px-2 py-1 text-[11px] font-semibold text-paper opacity-0 shadow-lg transition-all group-hover:translate-y-0 group-hover:opacity-100">
+        {tool.label.split(" —")[0]} <span className="ml-1 rounded bg-paper/20 px-1 font-mono text-[10px]">{tool.key}</span>
+      </span>
     </button>
   );
 }
@@ -83,9 +85,18 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
   const online = useUiStore((s) => s.sync.status === "online");
   const viewOnly = useUiStore((s) => s.sync.readOnly || s.viewMode);
   const aiOpen = useUiStore((s) => s.aiOpen);
+  const ritualsOpen = useUiStore((s) => s.ritualsOpen);
+  const voting = useUiStore((s) => s.voting);
   const locked = historyOpen || viewOnly;
   return (
     <AnimatePresence>
+      {!historyOpen && voting && (
+        <motion.div key="voting" initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }} className="pointer-events-none absolute inset-x-0 bottom-[78px] flex justify-center">
+          <button type="button" onClick={() => useUiStore.getState().setVoting(false)} className="pointer-events-auto flex items-center gap-2 rounded-full bg-[#dd2f6e] px-4 py-2 text-[12px] font-bold text-white shadow-[0_10px_30px_rgba(221,47,110,0.45)]">
+            <Icon name="star" className="h-3.5 w-3.5" filled /> Voting on — click notes to vote · Done
+          </button>
+        </motion.div>
+      )}
       {!historyOpen && (
         <motion.div
           key="dock"
@@ -95,7 +106,7 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
           transition={{ ...spring, delay: 0.05 }}
           className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
         >
-          <div className={`pointer-events-auto flex max-w-full items-center gap-0.5 overflow-x-auto p-1.5 scroll-quiet ${panel}`}>
+          <div data-tour="dock" className={`pointer-events-auto flex max-w-full items-center gap-0.5 p-1.5 ${panel}`}>
             {TOOLS.map((tool) => (
               <ToolButton key={tool.id} tool={tool} disabled={tool.edits && locked} />
             ))}
@@ -106,6 +117,19 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
             <span className="mx-1 h-6 w-px shrink-0 bg-line" />
             <motion.button
               type="button"
+              data-tour="rituals"
+              title="Team rituals: timer, voting, spotlight, present, simulated team"
+              disabled={!editor}
+              onClick={() => useUiStore.getState().setRitualsOpen(!useUiStore.getState().ritualsOpen)}
+              whileTap={{ scale: 0.95 }}
+              className={`flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3 text-[13px] font-semibold transition-colors disabled:opacity-30 ${ritualsOpen ? "bg-ink text-paper" : "text-ink hover:bg-hover"}`}
+            >
+              <Icon name="star" className="h-4 w-4" />
+              <span className="hidden lg:inline">Rituals</span>
+            </motion.button>
+            <motion.button
+              type="button"
+              data-tour="ai"
               title={viewOnly ? "View only: AI edits are disabled" : "Local AI: generate, diagram, organize, summarize"}
               disabled={!editor || locked}
               onClick={() => useUiStore.getState().setAiOpen(!aiOpen)}

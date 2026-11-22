@@ -14,6 +14,8 @@ const presenceArb: fc.Arbitrary<Presence> = fc.record({
         view: fc.record({ x: fc.integer(), y: fc.integer(), w: fc.nat(), h: fc.nat() }),
         chat: fc.string({ unit: "grapheme", minLength: 1, maxLength: 120 }),
         reaction: fc.record({ emoji: fc.constantFrom("🎉", "❤️", "👍", "🔥"), n: fc.nat({ max: 999_999 }) }),
+        spotlight: fc.constant(true),
+        laser: fc.constant(true),
       },
       { requiredKeys: [] },
     )

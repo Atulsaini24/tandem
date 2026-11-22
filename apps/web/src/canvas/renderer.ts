@@ -6,6 +6,7 @@ import {
   boundsOf,
   corners,
   handlePositions,
+  quickConnectPoints,
   visualBounds,
   type Rect,
 } from "./geometry";
@@ -51,7 +52,23 @@ interface ShapeNode {
   view: ShapeView;
   /** Cache key of what a Graphics body was last drawn with. */
   drawn: string;
+  /** Spring "pop" (ms elapsed; undefined = at rest). */
+  pop: number | undefined;
+  /** Dot-vote badge. */
+  badge: Container | undefined;
+  badgeKey: string;
 }
+
+/** A glowing laser trail: world points with the time they were added. */
+interface Trail {
+  readonly color: number;
+  readonly points: Array<{ x: number; y: number; at: number }>;
+}
+
+const LASER_MS = 650;
+const POP_MS = 520;
+/** Damped spring from 0 to 1 with a little overshoot. */
+const springPop = (t: number): number => 1 - Math.exp(-7 * t) * Math.cos(11 * t);
 
 /** A floating emoji reaction (screen space). */
 interface Floater {
@@ -146,7 +163,14 @@ export class Renderer {
   #theme: CanvasTheme = CANVAS_THEMES.light;
   #zoomTarget = 1;
   #zoomAnchor: Point = { x: 0, y: 0 };
-  #flight: { from: Viewport; to: Viewport; elapsed: number; ms: number } | undefined;
+  #flight: { from: Viewport; to: Viewport; elapsed: number; ms: number; arc: boolean } | undefined;
+  readonly #laser = new Graphics();
+  readonly #trails = new Map<string, Trail>();
+  #laserWasDrawn = false;
+  #quickConnect: NodeId | undefined;
+  #createdThisFrame = 0;
+  /** Identity of whoever is viewing, to highlight their own votes. */
+  voter = "";
   #overlayDirty = true;
   #arrowsDirty = false;
   #lastSelection: ReadonlySet<NodeId> | undefined;
@@ -187,7 +211,7 @@ export class Renderer {
 
     // No Pixi hit-testing: we do our own (see geometry.ts).
     this.app.stage.eventMode = "none";
-    this.#world.addChild(this.#layer, this.#overlay);
+    this.#world.addChild(this.#layer, this.#overlay, this.#laser);
     // Cursors and reactions live above the world, in screen space.
     this.app.stage.addChild(this.#grid, this.#world, this.#floatLayer, this.#cursorLayer);
 
@@ -276,11 +300,11 @@ export class Renderer {
    * Animate the camera so `rect` (world coordinates) fills the view. `maxZoom` caps how far
    * it zooms in; `insetRight` keeps it clear of a panel covering the right edge.
    */
-  fitTo(rect: Rect, padding = 80, insetRight = 0, maxZoom = 1, ms = 650): void {
+  fitTo(rect: Rect, padding = 80, insetRight = 0, maxZoom = 1, ms = 650, arc = false): void {
     const { height } = this.screen;
     const width = Math.max(200, this.screen.width - insetRight);
     const zoom = clampZoom(Math.min(maxZoom, (width - padding * 2) / Math.max(1, rect.w), (height - padding * 2) / Math.max(1, rect.h)));
-    this.#fly({ zoom, x: width / 2 - (rect.x + rect.w / 2) * zoom, y: height / 2 - (rect.y + rect.h / 2) * zoom }, ms);
+    this.#fly({ zoom, x: width / 2 - (rect.x + rect.w / 2) * zoom, y: height / 2 - (rect.y + rect.h / 2) * zoom }, ms, arc);
   }
 
   /** Follow mode: ease toward showing exactly `rect` every frame (no animation restart). */
@@ -296,8 +320,8 @@ export class Renderer {
     this.#overlayDirty = true;
   }
 
-  #fly(to: Viewport, ms: number): void {
-    this.#flight = { from: this.viewport, to, elapsed: 0, ms };
+  #fly(to: Viewport, ms: number, arc = false): void {
+    this.#flight = { from: this.viewport, to, elapsed: 0, ms, arc };
     this.#zoomTarget = to.zoom;
   }
 
@@ -305,11 +329,25 @@ export class Renderer {
     const flight = this.#flight;
     if (!flight) return;
     flight.elapsed += dtMs;
-    const t = easeOutCubic(Math.min(1, flight.elapsed / flight.ms));
+    const raw = Math.min(1, flight.elapsed / flight.ms);
+    const t = flight.arc ? (raw < 0.5 ? 4 * raw ** 3 : 1 - (-2 * raw + 2) ** 3 / 2) : easeOutCubic(raw);
     const { from, to } = flight;
-    // Zoom in log space; position follows so the motion reads as one camera move.
-    const zoom = Math.exp(Math.log(from.zoom) + (Math.log(to.zoom) - Math.log(from.zoom)) * t);
-    this.viewport = { zoom, x: lerp(from.x, to.x, t), y: lerp(from.y, to.y, t) };
+    if (flight.arc) {
+      // Cinematic: pull back mid-flight, then dive in (zoom along a dip, centers in world space).
+      const { width, height } = this.screen;
+      const c0 = { x: (width / 2 - from.x) / from.zoom, y: (height / 2 - from.y) / from.zoom };
+      const c1 = { x: (width / 2 - to.x) / to.zoom, y: (height / 2 - to.y) / to.zoom };
+      const dist = Math.hypot(c1.x - c0.x, c1.y - c0.y);
+      const dip = Math.min(0.85, dist / (dist + width / Math.min(from.zoom, to.zoom)));
+      const logZoom = lerp(Math.log(from.zoom), Math.log(to.zoom), t) - Math.sin(Math.PI * t) * dip * 1.4;
+      const zoom = Math.exp(logZoom);
+      const c = { x: lerp(c0.x, c1.x, t), y: lerp(c0.y, c1.y, t) };
+      this.viewport = { zoom, x: width / 2 - c.x * zoom, y: height / 2 - c.y * zoom };
+    } else {
+      // Zoom in log space; position follows so the motion reads as one camera move.
+      const zoom = Math.exp(Math.log(from.zoom) + (Math.log(to.zoom) - Math.log(from.zoom)) * t);
+      this.viewport = { zoom, x: lerp(from.x, to.x, t), y: lerp(from.y, to.y, t) };
+    }
     this.#overlayDirty = true;
     if (flight.elapsed >= flight.ms) this.#flight = undefined;
   }
@@ -362,6 +400,38 @@ export class Renderer {
     return { ...node.view, x, y, w, h, rotation };
   };
 
+  /** A springy "pop" on a shape (created, voted). */
+  pulse(id: NodeId): void {
+    const node = this.#nodes.get(id);
+    if (node && node.view.kind !== "arrow") node.pop = 0;
+  }
+
+  set laserOn(on: boolean) {
+    if (!on) this.#trails.delete("me");
+  }
+
+  /** Add a point to a laser trail (key = who). */
+  addLaserPoint(key: string, p: Point, color: number): void {
+    let trail = this.#trails.get(key);
+    if (!trail) {
+      trail = { color, points: [] };
+      this.#trails.set(key, trail);
+    }
+    const last = trail.points[trail.points.length - 1];
+    if (last && Math.hypot(last.x - p.x, last.y - p.y) * this.viewport.zoom < 1.5) {
+      last.at = performance.now();
+      return;
+    }
+    trail.points.push({ x: p.x, y: p.y, at: performance.now() });
+  }
+
+  /** Show the quick-connect "+" handles around this shape. */
+  set quickConnect(id: NodeId | undefined) {
+    if (id === this.#quickConnect) return;
+    this.#quickConnect = id;
+    this.#overlayDirty = true;
+  }
+
   /** Float an emoji up from a world point (reactions). */
   spawnReaction(world: Point, emoji: string): void {
     const start = this.worldToScreen(world);
@@ -399,6 +469,9 @@ export class Renderer {
     this.#peers.step(dtMs);
     this.#drawCursors(v);
     if (this.#floaters.length > 0) this.#stepFloaters(dtMs);
+    this.#stepPops(dtMs);
+    this.#drawLaser();
+    this.#createdThisFrame = 0;
     if (this.#peers.version !== this.#peersVersion) {
       this.#peersVersion = this.#peers.version;
       this.#overlayDirty = true; // remote selections may have changed
@@ -499,11 +572,16 @@ export class Renderer {
       pose: poseOf(view),
       view,
       drawn: "",
+      pop: undefined,
+      badge: undefined,
+      badgeKey: "",
     };
     this.#nodes.set(view.id, node);
     this.#layer.addChild(holder);
     this.#applyLook(node);
     this.#place(node);
+    this.#createdThisFrame += 1;
+    if (this.#createdThisFrame <= 40 && view.kind !== "arrow" && this.#nodes.size > 1) node.pop = 0;
     return node;
   }
 
@@ -588,6 +666,88 @@ export class Renderer {
 
     this.#syncLabel(node);
     this.#syncCaption(node);
+    this.#syncBadge(node);
+  }
+
+  /** A round badge with the vote count; ringed when one of the votes is yours. */
+  #syncBadge(node: ShapeNode): void {
+    const voters = node.view.voters ?? [];
+    const mine = voters.includes(this.voter);
+    const key = voters.length > 0 ? `${voters.length}|${mine}|${this.#theme.name}` : "";
+    if (key === node.badgeKey) return;
+    node.badgeKey = key;
+    node.badge?.destroy({ children: true });
+    node.badge = undefined;
+    if (!key) return;
+    const badge = new Container();
+    const g = new Graphics()
+      .circle(0, 0, 15)
+      .fill(0xdd2f6e)
+      .stroke({ width: mine ? 3 : 2, color: mine ? 0xffd666 : 0xffffff });
+    const text = new Text({ text: String(voters.length), resolution: 2, style: { fontFamily: FONT, fontSize: 14, fontWeight: "800", fill: 0xffffff } });
+    text.anchor.set(0.5);
+    badge.addChild(g, text);
+    node.holder.addChild(badge);
+    node.badge = badge;
+    this.#placeBadge(node);
+    node.pop = 0;
+  }
+
+  #placeBadge(node: ShapeNode): void {
+    if (node.badge) node.badge.position.set(node.pose.w / 2 - 4, -node.pose.h / 2 + 4);
+  }
+
+  #stepPops(dtMs: number): void {
+    for (const node of this.#nodes.values()) {
+      if (node.pop === undefined) continue;
+      node.pop += dtMs;
+      const t = Math.min(1, node.pop / POP_MS);
+      const s = t >= 1 ? 1 : 0.55 + 0.45 * springPop(t * 1.0);
+      node.holder.scale.set(s, s);
+      if (t >= 1) {
+        node.pop = undefined;
+        node.holder.scale.set(1, 1);
+      }
+    }
+  }
+
+  /** Laser trails: a wide soft glow under a bright core, fading along its length. */
+  #drawLaser(): void {
+    const g = this.#laser;
+    const now = performance.now();
+    for (const peer of this.#peers.list()) {
+      if (peer.presence.laser && peer.shown) this.addLaserPoint(peer.clientId, peer.shown, peer.presence.color);
+    }
+    if (this.#trails.size === 0) {
+      if (g.children.length > 0 || this.#laserWasDrawn) g.clear();
+      this.#laserWasDrawn = false;
+      return;
+    }
+    g.clear();
+    this.#laserWasDrawn = true;
+    const zoom = this.viewport.zoom;
+    for (const [key, trail] of this.#trails) {
+      while (trail.points.length > 0 && now - (trail.points[0]?.at ?? now) > LASER_MS) trail.points.shift();
+      if (trail.points.length === 0) {
+        this.#trails.delete(key);
+        continue;
+      }
+      const pts = trail.points;
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        if (!a || !b) continue;
+        const life = 1 - (now - b.at) / LASER_MS;
+        const w = (2 + 8 * life) / zoom;
+        g.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: w * 2.6, color: 0xff2d2d, alpha: 0.12 * life, cap: "round" });
+        g.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: w, color: 0xff4d4d, alpha: 0.85 * life, cap: "round" });
+      }
+      const head = pts[pts.length - 1];
+      if (head) {
+        g.circle(head.x, head.y, 14 / zoom).fill({ color: 0xff2d2d, alpha: 0.25 });
+        g.circle(head.x, head.y, 6 / zoom).fill(0xffe1e1);
+      }
+    }
   }
 
   #syncLabel(node: ShapeNode): void {
@@ -682,6 +842,7 @@ export class Renderer {
         label.position.set(left + (view.kind === "text" ? 2 : 11), top + (view.kind === "text" ? 2 : 10));
       }
     }
+    this.#placeBadge(node);
     const caption = node.caption;
     if (caption) {
       if (view.kind === "frame") caption.position.set(left + 2, top - FRAME_TITLE_H + 6);
@@ -921,6 +1082,15 @@ export class Renderer {
           g.rect(bounds.x - pad, bounds.y - pad, bounds.w + pad * 2, bounds.h + pad * 2).stroke({ ...stroke, alpha: 0.6 });
           for (const h of handlePositions(bounds, 0, zoom)) if (h.id !== "rotate") knob(h.p);
         }
+      }
+    }
+
+    const qc = this.#quickConnect === undefined ? undefined : this.lookup(this.#quickConnect);
+    if (qc) {
+      for (const { p } of quickConnectPoints(qc, zoom)) {
+        g.circle(p.x, p.y, 11 / zoom).fill({ color: theme.selection, alpha: 0.95 }).stroke({ width: 2 / zoom, color: 0xffffff });
+        const arm = 5 / zoom;
+        g.moveTo(p.x - arm, p.y).lineTo(p.x + arm, p.y).moveTo(p.x, p.y - arm).lineTo(p.x, p.y + arm).stroke({ width: 2 / zoom, color: 0xffffff, cap: "round" });
       }
     }
 

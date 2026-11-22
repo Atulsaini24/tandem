@@ -4,6 +4,8 @@
  * get a new name each visit).
  */
 export interface Identity {
+  /** Stable per browser: used as this person's voter key. */
+  readonly id: string;
   readonly name: string;
   readonly color: number;
 }
@@ -21,12 +23,14 @@ export function loadIdentity(): Identity {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) ?? "null") as Partial<Identity> | null;
     if (saved && typeof saved.name === "string" && typeof saved.color === "number") {
-      return { name: saved.name, color: saved.color };
+      const id = typeof saved.id === "string" && saved.id ? saved.id : crypto.randomUUID().slice(0, 12);
+      if (id !== saved.id) localStorage.setItem(KEY, JSON.stringify({ ...saved, id }));
+      return { id, name: saved.name, color: saved.color };
     }
   } catch {
     // fall through to a fresh identity
   }
-  const identity: Identity = { name: `${pick(ADJECTIVES, "Swift")} ${pick(ANIMALS, "Otter")}`, color: pick(COLORS, 0x2f63ff) };
+  const identity: Identity = { id: crypto.randomUUID().slice(0, 12), name: `${pick(ADJECTIVES, "Swift")} ${pick(ANIMALS, "Otter")}`, color: pick(COLORS, 0x2f63ff) };
   try {
     localStorage.setItem(KEY, JSON.stringify(identity));
   } catch {

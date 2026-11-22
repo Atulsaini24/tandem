@@ -1,4 +1,4 @@
-import type { NodeId, ShapeProps, ShapeView } from "@canvas/doc";
+import type { BoardMeta, NodeId, ShapeProps, ShapeView } from "@canvas/doc";
 import type { Presence, SyncStatus } from "@canvas/sync";
 
 /**
@@ -29,6 +29,10 @@ export type EditCommand =
   | { readonly type: "back"; readonly seq: number; readonly ids: readonly NodeId[]; readonly group?: number }
   /** Rename the board (synced, last writer wins; not an undo step). */
   | { readonly type: "title"; readonly seq: number; readonly title: string }
+  /** Shared timer and other board settings (synced, not an undo step). */
+  | { readonly type: "meta"; readonly seq: number; readonly meta: Omit<BoardMeta, "title"> }
+  /** Toggle this person's dot vote on a shape (not an undo step). */
+  | { readonly type: "vote"; readonly seq: number; readonly id: NodeId; readonly voter: string; readonly on: boolean }
   | { readonly type: "undo"; readonly seq: number }
   | { readonly type: "redo"; readonly seq: number }
   /** Make the live document match the version at server seq `at`. */
@@ -101,10 +105,11 @@ export type HistoryEvent =
   | { readonly type: "history"; readonly requestId: number; readonly at: number; readonly head: number; readonly shapes: readonly ShapeView[] }
   | { readonly type: "historyError"; readonly requestId: number; readonly message: string };
 
-/** The board's (synced) name changed, or was read when the document opened. */
+/** Board settings (name, shared timer) changed, or were read when the document opened. */
 export interface TitleEvent {
   readonly type: "title";
   readonly title: string | undefined;
+  readonly meta: BoardMeta;
 }
 
 export type EngineEvent = TitleEvent | PatchEvent | ErrorEvent | SyncEvent | RestoredEvent | PresenceEvent | UndoStateEvent | HistoryEvent;

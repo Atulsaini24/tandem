@@ -2,7 +2,7 @@
 
 /* The `dark:` variant follows the resolved theme on <html data-theme>, which honours the
    system setting unless the user picked light/dark explicitly (see canvas/theme.ts). */
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, .theme-dark, .theme-dark *));
 
 @theme {
   --color-canvas: #f3f0e8;
@@ -23,7 +23,8 @@
   --font-mono: "JetBrains Mono", SFMono-Regular, Consolas, monospace;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+.theme-dark {
   color-scheme: dark;
   --color-canvas: #111317;
   --color-paper: #1b1e24;

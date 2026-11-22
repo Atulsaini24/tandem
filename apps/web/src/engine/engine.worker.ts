@@ -29,7 +29,7 @@ function patchFor(doc: CanvasDocument, seq: number, delta: DocDelta, started: nu
   const removes = [];
   for (const id of touchedIds(delta)) {
     if (id === META_ID) {
-      scope.postMessage({ type: "title", title: doc.title });
+      scope.postMessage({ type: "title", title: doc.title, meta: doc.meta });
       continue;
     }
     const view = doc.shape(id);
@@ -66,6 +66,10 @@ async function edit(replica: OfflineReplica, command: EditCommand): Promise<DocD
       return doc.sendToBack(command.ids, options);
     case "title":
       return doc.setTitle(command.title);
+    case "meta":
+      return doc.setMeta(command.meta);
+    case "vote":
+      return doc.vote(command.id, command.voter, command.on);
     case "undo":
     case "redo": {
       const result = command.type === "undo" ? doc.undo() : doc.redo();
@@ -106,7 +110,7 @@ async function open(url: string, docId: string, online: boolean, token: string |
   });
 
   const shapes = replica.doc.shapes();
-  scope.postMessage({ type: "title", title: replica.doc.title });
+  scope.postMessage({ type: "title", title: replica.doc.title, meta: replica.doc.meta });
   scope.postMessage({ type: "patch", seq: 0, upserts: shapes, removes: [], order: shapes.map((s) => s.id), engineMs: 0, remote: true });
   scope.postMessage({
     type: "restored",
@@ -162,7 +166,7 @@ scope.addEventListener("message", (event) => {
             scope.postMessage(patchFor(replica.doc, command_.seq, delta, started, false));
             replica.commit(delta);
           }
-          if (command_.type !== "undo" && command_.type !== "redo" && command_.type !== "restore" && command_.type !== "title") {
+          if (command_.type !== "undo" && command_.type !== "redo" && command_.type !== "restore" && command_.type !== "title" && command_.type !== "meta" && command_.type !== "vote") {
             scope.postMessage({ type: "undoState", canUndo: replica.doc.canUndo, canRedo: replica.doc.canRedo });
           }
         } catch (error) {

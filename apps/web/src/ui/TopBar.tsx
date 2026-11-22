@@ -228,6 +228,7 @@ export function TopBar({ editor, onShare }: { editor: Editor | null; onShare: ()
         <Avatars editor={editor} />
         <motion.button
           type="button"
+          data-tour="share"
           onClick={onShare}
           disabled={!editor}
           whileTap={{ scale: 0.96 }}
