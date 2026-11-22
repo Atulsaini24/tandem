@@ -87,6 +87,35 @@ skipped deterministically. Throwing there would make replicas diverge.
 Deleting is a move, so it goes through the same conflict logic, takes the subtree with
 it, and is undoable (move it back). A concurrent "move into deleted group" stays in TRASH.
 
+## D014 — Text uses Fugue, not RGA, YATA or OT
+- **OT** (Google Docs style) needs a central server to transform ops. It doesn't work
+  peer-to-peer or offline-first.
+- **RGA / Logoot / LSEQ** converge, but concurrent text typed at the same spot can
+  *interleave*: "hello" + "world" → "hweolrllod". RGA does this for backward typing.
+- **YATA (Yjs)** avoids most interleaving, but is harder to reason about.
+- **Fugue (Weidner & Kleppmann 2023, chosen)**: characters form a tree of left and right
+  children. A run of typing builds its own chain, and an in-order walk emits whole
+  subtrees, so concurrent runs stay contiguous whether typed forward or backward.
+  Simple rules, proven non-interleaving.
+
+## D015 — Text state is two grow-only sets
+State = (set of inserted characters, set of deleted ids). Merge is set union, and the
+text is a pure function of the state, which fits D004. Two ordering problems are handled
+inside merge instead of requiring a causally-ordered network:
+- an insert whose parent hasn't arrived waits in a **pending buffer**;
+- a delete that overtakes its insert is recorded anyway (tombstone first).
+Deleted characters stay in the tree as tombstones, because later inserts may be anchored
+to them.
+
+## D016 — Text is tested three ways
+1. **Model-based**: on one replica, every random edit sequence matches a plain JS string.
+2. **No interleaving**: 3 replicas type words (forward or backward) at the same spot;
+   every word must appear unbroken. 5,000 cases.
+3. **Convergence vs a from-scratch rebuild**: 10,000 fuzzed histories.
+Mutation checks: the naive "always attach right" rule fails 6 tests, including backward
+interleaving and the string model; storing siblings in arrival order fails 4, including
+the fuzz.
+
 ## D013 — Tree correctness is checked against a reference implementation
 The test oracle is a 10-line naive version: sort every op by timestamp, replay from empty,
 skip cycles. The real engine must equal it for every delivery order. Mutation checks:

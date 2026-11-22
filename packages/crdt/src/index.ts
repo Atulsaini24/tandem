@@ -16,6 +16,7 @@ export { PNCounter, mergePNCounter, type PNCounterState } from "./pn-counter.js"
 export { LWWRegister, mergeLWWEntry, type LWWEntry } from "./lww-register.js";
 export { LWWMap, mergeLWWMap, type LWWMapEntry, type LWWMapState } from "./lww-map.js";
 export { isValidPosition, positionBetween } from "./fractional-index.js";
+export { FugueText, type CharId, type TextDelta, type TextInsert } from "./fugue-text.js";
 export {
   MoveTree,
   ROOT,
