@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { NodeId } from "@canvas/doc";
+import type { SyncStatus } from "@canvas/sync";
 
 export type Tool = "select" | "rect" | "ellipse";
 
@@ -29,15 +30,26 @@ export interface BenchResult {
   readonly movedPerFrame: number;
 }
 
+export interface SyncUiState {
+  readonly status: SyncStatus;
+  readonly pending: number;
+  readonly error?: string;
+  /** What the user asked for with the online/offline toggle. */
+  readonly wantOnline: boolean;
+  readonly docId: string;
+}
+
 interface UiState {
   readonly tool: Tool;
   readonly selection: ReadonlySet<NodeId>;
   readonly stats: Stats;
   readonly bench: BenchResult | "running" | undefined;
+  readonly sync: SyncUiState;
   setTool(tool: Tool): void;
   setSelection(selection: ReadonlySet<NodeId>): void;
   setStats(stats: Partial<Stats>): void;
   setBench(bench: BenchResult | "running" | undefined): void;
+  setSync(sync: Partial<SyncUiState>): void;
 }
 
 /**
@@ -50,7 +62,9 @@ export const useUiStore = create<UiState>()((set) => ({
   selection: new Set(),
   stats: { fps: 0, p95: 0, shapes: 0, zoom: 1, engineMs: 0 },
   bench: undefined,
+  sync: { status: "offline", pending: 0, wantOnline: true, docId: "default" },
   setTool: (tool) => set({ tool }),
+  setSync: (sync) => set((state) => ({ sync: { ...state.sync, ...sync } })),
   setSelection: (selection) => set({ selection }),
   setStats: (stats) => set((state) => ({ stats: { ...state.stats, ...stats } })),
   setBench: (bench) => set({ bench }),

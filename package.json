@@ -7,7 +7,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --filter @canvas/web dev",
+    "dev": "pnpm --parallel --filter @canvas/web --filter @canvas/server dev",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",

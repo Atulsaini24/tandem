@@ -11,6 +11,17 @@ const PALETTE = [0x2f63ff, 0xef6b3a, 0x1e8f5a, 0x7b55e7, 0xdd4f78, 0x137d77, 0xc
 const STATS_INTERVAL_MS = 500;
 const FRAME_WINDOW = 120;
 
+const DOC_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Which server and document to sync with: ?doc=<id> picks the board. */
+function syncTarget(): { url: string; docId: string } {
+  const requested = new URLSearchParams(location.search).get("doc") ?? "default";
+  const docId = DOC_ID_PATTERN.test(requested) ? requested : "default";
+  const configured = import.meta.env.VITE_SYNC_URL as string | undefined;
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  return { url: configured ?? `${scheme}://${location.hostname}:8787`, docId };
+}
+
 function randomFill(): number {
   return PALETTE[Math.floor(Math.random() * PALETTE.length)] ?? 0x111318;
 }
@@ -35,9 +46,15 @@ export class Editor {
   #controller: Controller | undefined;
   readonly #unsubscribe: () => void;
 
-  // Drag updates are coalesced: at most one engine command per frame.
+  // Drag updates are coalesced: at most one engine command per frame. A timer backs up
+  // the frame: background tabs get no animation frames, and an edit must never wait
+  // for the screen to repaint before it reaches the engine (and the network).
   readonly #pendingMoves = new Map<NodeId, { x: number; y: number }>();
   #pendingSeq = 0;
+  #flushTimer: ReturnType<typeof setTimeout> | undefined;
+  readonly #onHidden = (): void => {
+    if (document.visibilityState === "hidden") this.#flushMoves();
+  };
 
   readonly #frameTimes: number[] = [];
   #statsElapsed = 0;
@@ -53,12 +70,25 @@ export class Editor {
     await this.renderer.init(host);
     this.#controller = new Controller(this.renderer.app.canvas, this);
     this.renderer.frameListeners.add((dt) => this.#onFrame(dt));
+    document.addEventListener("visibilitychange", this.#onHidden);
+
+    const { url, docId } = syncTarget();
+    useUiStore.getState().setSync({ docId });
+    this.engine.send({ type: "connect", url, docId });
+  }
+
+  /** The demo toggle: simulate losing / regaining the network. */
+  setOnline(online: boolean): void {
+    useUiStore.getState().setSync({ wantOnline: online });
+    this.engine.send({ type: "network", online });
   }
 
   destroy(): void {
     // Only remove the debug hook if it's ours: under StrictMode a discarded editor
     // can finish tearing down after the surviving one has registered itself.
     if (Reflect.get(globalThis, "__editor") === this) Reflect.deleteProperty(globalThis, "__editor");
+    document.removeEventListener("visibilitychange", this.#onHidden);
+    clearTimeout(this.#flushTimer);
     this.#controller?.destroy();
     this.#unsubscribe();
     this.engine.terminate();
@@ -96,6 +126,17 @@ export class Editor {
     );
     for (const { id, x, y } of moves) this.#pendingMoves.set(id, { x, y });
     this.#pendingSeq = seq;
+    this.#flushTimer ??= setTimeout(() => this.#flushMoves(), 50);
+  }
+
+  /** Send queued moves to the engine: on the next frame or after 50ms, whichever is first. */
+  #flushMoves(): void {
+    clearTimeout(this.#flushTimer);
+    this.#flushTimer = undefined;
+    if (this.#pendingMoves.size === 0) return;
+    const updates = [...this.#pendingMoves].map(([id, patch]) => ({ id, patch }));
+    this.#pendingMoves.clear();
+    this.engine.send({ type: "update", seq: this.#pendingSeq, updates });
   }
 
   deleteSelection(): void {
@@ -204,6 +245,11 @@ export class Editor {
   // --- internals -----------------------------------------------------------
 
   #onEngine(event: EngineEvent): void {
+    if (event.type === "sync") {
+      const { status, pending, error } = event;
+      useUiStore.getState().setSync(error === undefined ? { status, pending } : { status, pending, error });
+      return;
+    }
     if (event.type === "error") {
       console.error(`engine rejected command #${event.seq}: ${event.message}`);
       return;
@@ -219,11 +265,7 @@ export class Editor {
   }
 
   #onFrame(dtMs: number): void {
-    if (this.#pendingMoves.size > 0) {
-      const updates = [...this.#pendingMoves].map(([id, patch]) => ({ id, patch }));
-      this.#pendingMoves.clear();
-      this.engine.send({ type: "update", seq: this.#pendingSeq, updates });
-    }
+    this.#flushMoves();
 
     this.#frameTimes.push(dtMs);
     if (this.#frameTimes.length > FRAME_WINDOW) this.#frameTimes.shift();

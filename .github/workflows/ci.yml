@@ -7,6 +7,23 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Real Postgres, so the store contract and the over-Postgres sync tests run in CI too.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: canvas
+          POSTGRES_PASSWORD: canvas-dev
+          POSTGRES_DB: canvas
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U canvas -d canvas"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgres://canvas:canvas-dev@localhost:5433/canvas
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -16,3 +33,4 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm build

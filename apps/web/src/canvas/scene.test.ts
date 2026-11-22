@@ -11,18 +11,26 @@ describe("Scene", () => {
     scene.updateLocal([{ id: "a", patch: { x: 10 } }], 2);
     scene.updateLocal([{ id: "a", patch: { x: 20 } }], 3);
 
-    scene.applyPatch({ type: "patch", seq: 2, upserts: [shape("a", 10)], removes: [], engineMs: 0 });
+    scene.applyPatch({ type: "patch", seq: 2, upserts: [shape("a", 10)], removes: [], engineMs: 0, remote: false });
     expect(scene.get("a")?.x).toBe(20); // stale echo of seq 2 ignored
 
-    scene.applyPatch({ type: "patch", seq: 3, upserts: [shape("a", 20)], removes: [], engineMs: 0 });
+    scene.applyPatch({ type: "patch", seq: 3, upserts: [shape("a", 20)], removes: [], engineMs: 0, remote: false });
     expect(scene.get("a")?.x).toBe(20);
   });
 
   it("accepts patches for shapes with no newer local edit", () => {
     const scene = new Scene();
-    scene.applyPatch({ type: "patch", seq: 5, upserts: [shape("a", 7)], removes: [], order: ["a"], engineMs: 0 });
+    scene.applyPatch({ type: "patch", seq: 5, upserts: [shape("a", 7)], removes: [], order: ["a"], engineMs: 0, remote: false });
     expect(scene.get("a")?.x).toBe(7);
     expect(scene.ids()).toEqual(["a"]);
+  });
+
+  it("a remote order that predates a local create keeps the new shape visible", () => {
+    const scene = new Scene();
+    scene.applyPatch({ type: "patch", seq: 1, upserts: [shape("a")], removes: [], order: ["a"], engineMs: 0, remote: false });
+    scene.addLocal([shape("mine")], 2); // worker hasn't processed seq 2 yet
+    scene.applyPatch({ type: "patch", seq: 1, upserts: [shape("theirs")], removes: [], order: ["a", "theirs"], engineMs: 0, remote: true });
+    expect(scene.ids()).toEqual(["a", "theirs", "mine"]);
   });
 
   it("tracks dirty shapes and order changes for the renderer", () => {

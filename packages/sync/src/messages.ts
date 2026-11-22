@@ -1,0 +1,110 @@
+import { DecodeError, Reader, Writer } from "./codec.js";
+
+/**
+ * Wire messages. One binary WebSocket frame = one message; the first byte is its type.
+ *
+ * Deltas travel as opaque, already-encoded bytes: the server validates a pushed delta
+ * once, stores those exact bytes, and relays them to other clients without re-encoding.
+ *
+ *   client → server   HELLO  version, docId, clientId, since (last server seq seen)
+ *                     PUSH   clientSeq, delta
+ *   server → client   DELTA  serverSeq, delta      (backlog after HELLO, then live)
+ *                     WELCOME head                 (backlog done, you're live)
+ *                     ACK    clientSeq, serverSeq  (your push is durable)
+ *                     ERROR  fatal, message
+ */
+export const PROTOCOL_VERSION = 1;
+
+const HELLO = 1;
+const PUSH = 2;
+const WELCOME = 16;
+const DELTA = 17;
+const ACK = 18;
+const ERROR = 19;
+
+export type ClientMessage =
+  | { readonly type: "hello"; readonly version: number; readonly docId: string; readonly clientId: string; readonly since: number }
+  | { readonly type: "push"; readonly clientSeq: number; readonly delta: Uint8Array };
+
+export type ServerMessage =
+  | { readonly type: "welcome"; readonly head: number }
+  | { readonly type: "delta"; readonly serverSeq: number; readonly delta: Uint8Array }
+  | { readonly type: "ack"; readonly clientSeq: number; readonly serverSeq: number }
+  | { readonly type: "error"; readonly fatal: boolean; readonly message: string };
+
+export function encodeClientMessage(message: ClientMessage): Uint8Array {
+  const w = new Writer();
+  if (message.type === "hello") {
+    w.byte(HELLO);
+    w.uint(message.version);
+    w.str(message.docId);
+    w.str(message.clientId);
+    w.uint(message.since);
+  } else {
+    w.byte(PUSH);
+    w.uint(message.clientSeq);
+    w.bytes(message.delta);
+  }
+  return w.finish();
+}
+
+export function decodeClientMessage(bytes: Uint8Array): ClientMessage {
+  const r = new Reader(bytes);
+  const type = r.byte();
+  if (type === HELLO) {
+    const message: ClientMessage = { type: "hello", version: r.uint(), docId: r.str(), clientId: r.str(), since: r.uint() };
+    r.end();
+    return message;
+  }
+  if (type === PUSH) return { type: "push", clientSeq: r.uint(), delta: r.rest() };
+  throw new DecodeError(`unknown client message type ${type}`);
+}
+
+export function encodeServerMessage(message: ServerMessage): Uint8Array {
+  const w = new Writer();
+  switch (message.type) {
+    case "welcome":
+      w.byte(WELCOME);
+      w.uint(message.head);
+      break;
+    case "delta":
+      w.byte(DELTA);
+      w.uint(message.serverSeq);
+      w.bytes(message.delta);
+      break;
+    case "ack":
+      w.byte(ACK);
+      w.uint(message.clientSeq);
+      w.uint(message.serverSeq);
+      break;
+    case "error":
+      w.byte(ERROR);
+      w.byte(message.fatal ? 1 : 0);
+      w.str(message.message);
+      break;
+  }
+  return w.finish();
+}
+
+export function decodeServerMessage(bytes: Uint8Array): ServerMessage {
+  const r = new Reader(bytes);
+  const type = r.byte();
+  let message: ServerMessage;
+  switch (type) {
+    case WELCOME:
+      message = { type: "welcome", head: r.uint() };
+      break;
+    case DELTA:
+      return { type: "delta", serverSeq: r.uint(), delta: r.rest() };
+    case ACK:
+      message = { type: "ack", clientSeq: r.uint(), serverSeq: r.uint() };
+      break;
+    case ERROR:
+      message = { type: "error", fatal: r.byte() === 1, message: r.str() };
+      break;
+    default:
+      throw new DecodeError(`unknown server message type ${type}`);
+  }
+  r.end();
+  return message;
+}

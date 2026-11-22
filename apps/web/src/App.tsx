@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createEditor, type Editor } from "./canvas/editor";
 import { Hud, KeyHints } from "./ui/Hud";
+import { SyncPill } from "./ui/SyncPill";
 import { Toolbar } from "./ui/Toolbar";
 
 export function App() {
@@ -26,6 +27,7 @@ export function App() {
     <div className="relative h-full w-full select-none">
       <div ref={hostRef} className="absolute inset-0" />
       <Toolbar editor={editor} />
+      <SyncPill editor={editor} />
       <Hud />
       <KeyHints />
     </div>

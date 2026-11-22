@@ -6,6 +6,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@canvas/web", "dev"],
       "port": 5173
+    },
+    {
+      "name": "sync",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@canvas/server", "dev"],
+      "port": 8787
     }
   ]
 }

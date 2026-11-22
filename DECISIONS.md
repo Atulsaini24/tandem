@@ -167,6 +167,71 @@ Measured (M4, 5,000 shapes, 500 moved per frame, pan + zoom, preview pane):
 - fps equal to the empty-page baseline (~31 in that pane): the app costs no frames
 - 5,000 shapes created and drawn end to end in 235 ms
 
+## D023 — Sync = server sequence numbers + client outbox
+The server appends every accepted delta to a per-document log and numbers it 1, 2, 3...
+- **Cursor:** each client remembers the highest number it has seen. On reconnect it sends
+  `HELLO since=N` and gets exactly the deltas after N. That's the whole catch-up protocol:
+  no version-vector diffing, no full-state exchange.
+- **Outbox:** local deltas stay queued until ACKed and are resent on every connect.
+  The server stores each `(clientId, clientSeq)` once (UNIQUE constraint in Postgres), so
+  a resend after a lost ACK is harmless. CRDT merges are idempotent anyway; this keeps the
+  log clean.
+- **Ordering:** one async queue per document (`Room`) does reading the backlog, joining
+  the broadcast set, appending and relaying. So no delta can slip in between a client's
+  backlog and its live stream: nothing is missed or sent twice.
+- Considered: exchanging version vectors or state diffs peer-to-peer. That's more general,
+  but costs more per reconnect and still needs a durable place for offline peers. A central
+  log makes the server the natural place for auth, validation and persistence (M7/M8).
+
+## D024 — Binary wire format with a string table
+Varints, plus a per-message string table (replica ids, node ids and keys stored once,
+then referenced by index), plus tagged values. **A 5,000-shape create is 755 KB vs 5.0 MB
+as JSON (15%).** The server stores and relays the exact bytes a client pushed, with no
+re-encoding. Decoding is hostile-input-safe: bounds-checked reads, counts checked against
+the remaining bytes (a forged length can't allocate gigabytes), and only `DecodeError` is
+ever thrown (fuzzed with random bytes and every truncation of valid input). The property
+test caught a real bug: 2^52 passed the "compact int" check but zigzags to 2^53, past the
+safe-integer limit.
+
+## D025 — The server validates every push
+Before a delta reaches the log: it must decode; every timestamp's replica must equal the
+connection's clientId (a client can't forge someone else's edits); and no timestamp may
+be more than 60s in the future (one broken clock would otherwise drag every HLC forward
+forever, the clock-drift item from LATER.md). Rejection is fatal for that connection only;
+other clients are unaffected (tested).
+
+## D026 — `ws`, not uWebSockets.js (for now)
+uWS installs prebuilt native binaries from GitHub, not npm. Nothing measured so far says
+the socket layer is the bottleneck: the CRDT merge runs on clients, and the server only
+validates and relays bytes. The transport is confined to `server.ts`; M8's load test
+decides whether swapping is worth it.
+
+## D027 — Edits never wait for a repaint
+Found in the two-tab test: drag moves were batched to "next animation frame", but browsers
+pause frames in background tabs, so a move made just before switching tabs never left
+the tab. The fix sends queued moves on the next frame or after 50ms (whichever is
+first), and immediately when the page becomes hidden. Rendering cadence and data
+durability are now independent.
+
+## D028 — Sync is tested at the wire, not just at the result
+The gate counts DELTA messages *as they arrive*, before the client's own "already seen"
+filter. Otherwise a server that resent the whole history would pass, because the client
+quietly drops the duplicates. Mutation checks: ignoring `since`, dropping dedupe, skipping
+the replica check, and not resending the outbox each fail at least one test.
+
+## D029 — One contract test suite for every Store
+`store.test.ts` runs the same contract (per-document numbering, dedupe, exact tail reads,
+bytes intact up to 70 KB, survives a reconnect) against `MemoryStore` and `PostgresStore`.
+The fast in-memory store used by the other server tests is only trustworthy if it behaves
+exactly like the production store, and this suite is what makes it so. Postgres tests run when
+`DATABASE_URL` is set: locally via `pnpm db:up` (docker-compose, port 5433), and in CI
+via a Postgres service container. A second suite runs the M5 gate end to end over
+Postgres, including a full server + connection-pool restart.
+
+Dedupe has two layers: `ON CONFLICT DO NOTHING` makes a resend a clean "duplicate", and
+the `UNIQUE (doc_id, client_id, client_seq)` constraint refuses to store a duplicate even
+if that clause is removed (mutation-tested: 2 contract tests fail with a constraint error).
+
 ## D013 — Tree correctness is checked against a reference implementation
 The test oracle is a 10-line naive version: sort every op by timestamp, replay from empty,
 skip cycles. The real engine must equal it for every delivery order. Mutation checks:

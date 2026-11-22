@@ -84,7 +84,13 @@ export class Scene {
       this.orderDirty = true;
     }
     if (patch.order) {
-      this.#order = [...patch.order];
+      // A remote patch can carry an order computed before the worker saw our newest
+      // optimistic creates. Keep those at the end until their own patch arrives.
+      const inOrder = new Set(patch.order);
+      const localOnly = this.#order.filter(
+        (id) => !inOrder.has(id) && this.#shapes.has(id) && (this.#localSeq.get(id) ?? 0) > patch.seq,
+      );
+      this.#order = [...patch.order, ...localOnly];
       this.orderDirty = true;
     }
   }

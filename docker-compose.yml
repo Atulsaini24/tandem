@@ -1,0 +1,22 @@
+# Local development database. The credentials below are for this local container only.
+#   docker compose up -d postgres
+#   DATABASE_URL=postgres://canvas:canvas-dev@localhost:5433/canvas
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: canvas
+      POSTGRES_PASSWORD: canvas-dev
+      POSTGRES_DB: canvas
+    ports:
+      - "5433:5432" # 5433 on the host, so it never clashes with a locally installed Postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U canvas -d canvas"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:
