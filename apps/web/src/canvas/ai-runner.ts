@@ -10,7 +10,6 @@ import {
   layoutDiagram,
   runDeck,
   runJson,
-  type DeckSlide,
   runDiagram,
   runInsight,
   stagingRect,
@@ -29,6 +28,7 @@ import { useUiStore } from "../state/ui-store";
 import { chatOptions } from "./ai-models";
 import { parseChart } from "./charts";
 import { parseScene } from "./scenes";
+import { hashTheme, SLIDE_H, SLIDE_THEMES, SLIDE_W, type SlideThemeName } from "./slides";
 import { boundsOf, visualBounds } from "./geometry";
 import { INK, NOTE_COLORS } from "./templates";
 import type { Editor } from "./editor";
@@ -221,7 +221,7 @@ export class AiRunner {
     }
   }
 
-  /** Make a chart (bar, line, area, pie, donut, funnel) with a takeaway note beside it. */
+  /** Make one designed chart card: KPIs, the plot and the insight, all in one shape. */
   async chart(prompt: string): Promise<void> {
     if (this.#abort) return;
     const abort = new AbortController();
@@ -234,15 +234,13 @@ export class AiRunner {
       const data = JSON.stringify(value);
       const spec = parseChart(data);
       if (!spec) throw new Error("The model didn't return usable chart data. Try rephrasing.");
-      const insight = typeof (value as { insight?: unknown }).insight === "string" ? (value as { insight: string }).insight.slice(0, 200) : "";
-      const w = spec.type === "pie" || spec.type === "donut" ? 620 : 720;
-      const h = 430;
-      const at = this.#freeSpot(w + 300, h);
-      const group = editor.beginGroup();
-      editor.aiCreate({ kind: "chart", x: at.x, y: at.y, w, h, fill: 0x2f63ff, data, label: spec.title }, group);
-      if (insight) editor.aiCreate({ kind: "rect", x: at.x + w + 40, y: at.y + 40, w: 260, h: 150, fill: NOTE_COLORS.yellow, label: `💡 ${insight}` }, group);
+      const w = 860;
+      const h = spec.kpis.length > 0 ? 600 : 500;
+      const at = this.#freeSpot(w, h);
+      const id = editor.aiCreate({ kind: "chart", x: at.x, y: at.y, w, h, fill: 0x2f63ff, data, label: spec.title }, editor.beginGroup());
+      useUiStore.getState().reveal([id]);
       useUiStore.getState().setAi({ status: "done", items: 1, finishedAt: Date.now(), message: `${spec.type} chart · ${spec.labels.length} points${spec.series.length > 1 ? ` · ${spec.series.length} series` : ""}`, ...(tokensPerSecond === undefined ? {} : { tokensPerSecond }) });
-      this.#show({ x: at.x, y: at.y - 20, w: w + (insight ? 300 : 0), h: h + 40 });
+      this.#show({ x: at.x, y: at.y - 20, w, h: h + 40 });
     } catch (error) {
       this.#fail(error, abort);
     } finally {
@@ -262,11 +260,11 @@ export class AiRunner {
       const data = JSON.stringify(value);
       const spec = parseScene(data);
       if (!spec) throw new Error("The model didn't return a usable 3D scene. Try rephrasing.");
-      const w = 760;
-      const h = 540;
+      const w = 960;
+      const h = 600;
       const at = this.#freeSpot(w, h);
       editor.aiCreate({ kind: "scene3d", x: at.x, y: at.y, w, h, fill: 0x111318, data, label: spec.title || prompt.slice(0, 60) }, editor.beginGroup());
-      useUiStore.getState().setAi({ status: "done", items: spec.objects.length, finishedAt: Date.now(), message: "3D scene · double-click it to orbit", ...(tokensPerSecond === undefined ? {} : { tokensPerSecond }) });
+      useUiStore.getState().setAi({ status: "done", items: spec.objects.length, finishedAt: Date.now(), message: `3D scene · ${spec.objects.length} objects · double-click it to orbit`, ...(tokensPerSecond === undefined ? {} : { tokensPerSecond }) });
       this.#show({ x: at.x, y: at.y - 20, w, h: h + 40 });
     } catch (error) {
       this.#fail(error, abort);
@@ -276,31 +274,47 @@ export class AiRunner {
   }
 
   /**
-   * A slide deck: each slide is a frame (960×540) built the moment the model finishes it,
-   * then Present mode plays them with animated reveals.
+   * A slide deck: each slide is a frame holding one designed slide (960×540), placed the
+   * moment the model finishes it; then Present mode plays them with animated reveals.
    */
   async deck(prompt: string): Promise<void> {
     if (this.#abort) return;
     const abort = new AbortController();
     this.#abort = abort;
     const editor = this.#editor;
-    const W = 960;
-    const H = 540;
+    const W = SLIDE_W;
+    const H = SLIDE_H;
     const GAP = 120;
     const notes = editor.scene.ordered().flatMap((s) => (s.label?.trim() && s.kind !== "frame" && editor.selected().some((x) => x.id === s.id) ? [s.label] : []));
     const origin = this.#freeSpot(W * 2 + GAP, H);
     const group = editor.beginGroup();
     const frames: NodeId[] = [];
+    const slides: Array<{ id: NodeId; data: Record<string, unknown> }> = [];
+    let deckTitle = "";
+    let theme = "";
     useUiStore.getState().setAi({ status: "thinking", mode: "deck", items: 0, startedAt: Date.now(), message: "", tokensPerSecond: 0 });
     try {
       for await (const event of runDeck(prompt, notes, llm(abort.signal))) {
-        if (event.type === "slide") {
+        if (event.type === "title") {
+          deckTitle = event.title || prompt.slice(0, 60);
+          theme = SLIDE_THEMES.includes(event.theme as SlideThemeName) ? event.theme : hashTheme(deckTitle);
+        } else if (event.type === "slide") {
           const x = origin.x + event.slide.index * (W + GAP);
           const y = origin.y;
-          frames.push(this.#slide(event.slide, x, y, W, H, group));
+          const data = { ...event.slide.raw, theme, deck: deckTitle, index: event.slide.index, total: 0 };
+          const frame = editor.aiCreate({ kind: "frame", x, y, w: W, h: H, fill: 0x2f63ff, label: `${event.slide.index + 1}. ${event.slide.title}`.slice(0, 120) }, group);
+          const id = editor.aiCreate({ kind: "slide", x, y, w: W, h: H, fill: 0x111318, data: JSON.stringify(data), label: event.slide.title }, group);
+          frames.push(frame);
+          slides.push({ id, data });
+          useUiStore.getState().reveal([id]);
           editor.renderer.fitTo({ x: x - 40, y: y - 80, w: W + 80, h: H + 120 }, 40, 0, 1, 700, true);
           useUiStore.getState().setAi({ status: "writing", items: frames.length });
         } else if (event.type === "done") {
+          // Now the deck size is known: number the slides "03 / 09".
+          editor.updateShapes(
+            slides.map((s) => ({ id: s.id, patch: { data: JSON.stringify({ ...s.data, total: slides.length }) } })),
+            group,
+          );
           useUiStore.getState().setAi({ status: "done", items: event.slides, finishedAt: Date.now(), message: "Playing it now in Present mode — arrows to move, Esc to stop", ...(event.tokensPerSecond === undefined ? {} : { tokensPerSecond: event.tokensPerSecond }) });
           if (frames.length > 0) {
             useUiStore.getState().setAi({ status: "done", result: { x: origin.x, y: origin.y - 40, w: frames.length * (W + GAP), h: H + 80 } });
@@ -313,51 +327,6 @@ export class AiRunner {
     } finally {
       this.#abort = undefined;
     }
-  }
-
-  /** Lay out one slide inside its frame, by layout. Returns the frame id. */
-  #slide(slide: DeckSlide, x: number, y: number, W: number, H: number, group: number): NodeId {
-    const editor = this.#editor;
-    const accent = [0x2f63ff, 0x7b55e7, 0x1e8f5a, 0xef6b3a, 0xdd4f78, 0x137d77][slide.index % 6] ?? 0x2f63ff;
-    const frame = editor.aiCreate({ kind: "frame", x, y, w: W, h: H, fill: accent, label: `${slide.index + 1}. ${slide.title}`.slice(0, 120) }, group);
-    editor.engine.send({ type: "back", seq: editor.engine.nextSeq(), ids: [frame], group });
-    const pad = 56;
-    if (slide.layout === "title") {
-      // Room for a two-line title (the font follows the box height: 72 → ~43px).
-      editor.aiCreate({ kind: "text", x: x + pad, y: y + 120, w: W - pad * 2, h: 72, fill: INK, label: slide.title }, group);
-      editor.aiCreate({ kind: "rect", x: x + pad, y: y + 300, w: 140, h: 10, fill: accent }, group);
-      if (slide.subtitle) editor.aiCreate({ kind: "text", x: x + pad, y: y + 336, w: W - pad * 2, h: 36, fill: INK, label: slide.subtitle }, group);
-      return frame;
-    }
-    editor.aiCreate({ kind: "text", x: x + pad, y: y + 44, w: W - pad * 2, h: 64, fill: INK, label: slide.title }, group);
-    if (slide.layout === "quote") {
-      editor.aiCreate({ kind: "rect", x: x + pad, y: y + 160, w: W - pad * 2, h: 260, fill: NOTE_COLORS.purple, label: `“${slide.subtitle || slide.bullets[0] || slide.title}”` }, group);
-    } else if (slide.layout === "stats" && slide.stats.length > 0) {
-      const n = slide.stats.length;
-      const cw = (W - pad * 2 - (n - 1) * 28) / n;
-      slide.stats.forEach((stat, i) => {
-        // Big-number layout: a huge value, a colored bar, and the label under it.
-        const sx = x + pad + i * (cw + 28);
-        const tint = [0x2f63ff, 0x1e8f5a, 0xef6b3a, 0x7b55e7][i % 4] ?? accent;
-        // The font follows the box height (≈0.6×); keep the value on one line in its column.
-        const valueH = Math.max(48, Math.min(110, cw / (0.4 * Math.max(3, Array.from(stat.value).length))));
-        editor.aiCreate({ kind: "text", x: sx, y: y + 280 - valueH, w: cw, h: valueH, fill: INK, label: stat.value }, group);
-        editor.aiCreate({ kind: "rect", x: sx, y: y + 300, w: Math.min(120, cw), h: 8, fill: tint }, group);
-        editor.aiCreate({ kind: "text", x: sx, y: y + 324, w: cw, h: 32, fill: INK, label: stat.label }, group);
-      });
-      if (slide.subtitle) editor.aiCreate({ kind: "text", x: x + pad, y: y + 430, w: W - pad * 2, h: 36, fill: INK, label: slide.subtitle }, group);
-    } else if (slide.layout === "chart" && slide.chart) {
-      const c = slide.chart;
-      const data = JSON.stringify({ type: c.type, title: "", unit: c.unit, labels: c.labels, series: [{ name: slide.title, values: c.values }], note: "" });
-      editor.aiCreate({ kind: "chart", x: x + pad, y: y + 130, w: slide.subtitle ? 560 : W - pad * 2, h: 360, fill: accent, data }, group);
-      if (slide.subtitle) editor.aiCreate({ kind: "rect", x: x + pad + 590, y: y + 170, w: W - pad * 2 - 590, h: 200, fill: NOTE_COLORS.yellow, label: `💡 ${slide.subtitle}` }, group);
-    } else {
-      const bullets = slide.bullets.length > 0 ? slide.bullets : slide.subtitle ? [slide.subtitle] : [];
-      bullets.forEach((b, i) => {
-        editor.aiCreate({ kind: "rect", x: x + pad, y: y + 140 + i * 72, w: W - pad * 2, h: 58, fill: i % 2 ? NOTE_COLORS.blue : NOTE_COLORS.green, label: `${i + 1}.  ${b}` }, group);
-      });
-    }
-    return frame;
   }
 
   /** Selected shapes that have text, in reading order. */

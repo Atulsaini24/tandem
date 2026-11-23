@@ -348,7 +348,7 @@ export class Editor {
       useUiStore.getState().setOrbiting(id);
       return;
     }
-    if (shape.kind === "chart") {
+    if (shape.kind === "chart" || shape.kind === "slide") {
       this.select([id]);
       useUiStore.getState().setAiOpen(false); // the Design tab has the chart controls
       return;
@@ -802,15 +802,20 @@ export class Editor {
     const target = frame ? visualBounds(frame, this.lookup) : boundsOf(this.scene.ordered().map((s) => visualBounds(s, this.lookup)));
     if (target) this.renderer.fitTo(target, 60, 0, 4, 1100, true);
     if (!frame) return;
-    // Animated reveal: once the camera lands, the slide's contents pop in, top to bottom.
+    // Animated reveal: once the camera lands, designed slides and charts build in, and
+    // everything else pops in top to bottom.
     const inside = this.scene
       .ordered()
       .filter((s) => s.id !== frame.id && s.kind !== "frame" && containsRect(frame, visualBounds(s, this.lookup)))
       .sort((a, b) => a.y - b.y || a.x - b.x);
+    const designed = inside.filter((s) => s.kind === "slide" || s.kind === "chart");
+    useUiStore.getState().reveal(designed.map((s) => s.id), 700);
     clearTimeout(this.#revealTimer);
-    inside.forEach((s, i) => {
-      this.#revealTimer = setTimeout(() => this.renderer.pulse(s.id), 850 + i * 140);
-    });
+    inside
+      .filter((s) => s.kind !== "slide" && s.kind !== "chart")
+      .forEach((s, i) => {
+        this.#revealTimer = setTimeout(() => this.renderer.pulse(s.id), 850 + i * 140);
+      });
   }
 
   // --- quick-connect -------------------------------------------------------------------

@@ -118,6 +118,9 @@ interface UiState {
   readonly team: TeamUiState | undefined;
   /** The 3D scene currently taking mouse input (drag to orbit). */
   readonly orbiting: string | undefined;
+  /** Charts and slides playing their build-in animation, by id → when it started. */
+  readonly reveals: Readonly<Record<string, number>>;
+  reveal(ids: readonly string[], delay?: number): void;
   setOrbiting(id: string | undefined): void;
   setTeam(team: TeamUiState | undefined): void;
   readonly ritualsOpen: boolean;
@@ -200,6 +203,18 @@ export const useUiStore = create<UiState>()((set) => ({
   crowd: false,
   team: undefined,
   orbiting: undefined,
+  reveals: {},
+  reveal: (ids, delay = 0) => {
+    const at = Date.now() + delay;
+    const now = Date.now();
+    set((s) => {
+      // Drop finished ones while we're here.
+      const next: Record<string, number> = {};
+      for (const [id, t] of Object.entries(s.reveals)) if (now - t < 4000) next[id] = t;
+      for (const id of ids) next[id] = at;
+      return { reveals: next };
+    });
+  },
   setOrbiting: (orbiting) => set({ orbiting }),
   setTeam: (team) => set({ team }),
   ritualsOpen: false,

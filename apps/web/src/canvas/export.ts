@@ -1,6 +1,7 @@
 import type { ShapeView } from "@canvas/doc";
 import { FRAME_TITLE_H, arrowEnds, boundsOf, center, pathPoints, visualBounds, type Lookup, type Rect } from "./geometry";
 import { CHART_THEMES, chartSvg, parseChart, sceneCardSvg } from "./charts";
+import { parseSlide, slideSvg } from "./slides";
 import { displayFill, hex, inkColor, labelColor, type CanvasTheme } from "./theme";
 
 /**
@@ -106,11 +107,11 @@ function shapeSvg(s: ShapeView, lookup: Lookup, theme: CanvasTheme, withText: bo
       return `<line x1="${n(a.x)}" y1="${n(a.y)}" x2="${n(tail.x)}" y2="${n(tail.y)}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/><polygon points="${n(b.x)},${n(b.y)} ${n(p1.x)},${n(p1.y)} ${n(p2.x)},${n(p2.y)}" fill="${color}"/>${text}`;
     }
     case "chart":
+    case "slide":
     case "scene3d": {
-      const spec = s.kind === "chart" ? parseChart(s.data) : undefined;
       const w = Math.max(40, Math.round(s.w));
       const h = Math.max(30, Math.round(s.h));
-      const inner = spec ? chartSvg(spec, w, h, CHART_THEMES[theme.name]) : sceneCardSvg(s.label ?? "3D scene", w, h);
+      const inner = designSvg(s.kind, s.data, s.label, w, h, CHART_THEMES[theme.name]);
       // Nest the chart's own SVG, positioned and sized like the shape.
       return `<g${rot}>${inner.replace("<svg ", `<svg x="${n(s.x)}" y="${n(s.y)}" `)}</g>`;
     }
@@ -180,3 +181,16 @@ export function download(blob: Blob, filename: string): void {
 }
 
 export const safeFilename = (title: string): string => title.replace(/[^\p{L}\p{N}\- ]+/gu, "").trim().replace(/\s+/g, "-").slice(0, 60) || "board";
+
+/** The SVG design for a chart, slide or 3D card (shared by the renderer and export). */
+export function designSvg(kind: string, data: string | undefined, label: string | undefined, w: number, h: number, chartTheme: (typeof CHART_THEMES)["light"]): string {
+  if (kind === "chart") {
+    const spec = parseChart(data);
+    return spec ? chartSvg(spec, w, h, chartTheme) : sceneCardSvg("Chart: no data", w, h);
+  }
+  if (kind === "slide") {
+    const spec = parseSlide(data);
+    return spec ? slideSvg(spec, w, h) : sceneCardSvg("Slide: no content", w, h);
+  }
+  return sceneCardSvg(label ?? "3D scene", w, h);
+}

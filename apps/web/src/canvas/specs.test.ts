@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CHART_THEMES, chartSvg, parseChart } from "./charts";
+import { CHART_THEMES, CHART_TYPES, chartSvg, parseChart } from "./charts";
+import { parseSlide, SLIDE_THEMES, slideSvg } from "./slides";
 import { parseScene, sceneRadius } from "./scenes";
 
 describe("chart specs (untrusted input)", () => {
@@ -29,21 +30,112 @@ describe("chart specs (untrusted input)", () => {
 });
 
 describe("3D scene specs (untrusted input)", () => {
-  it("clamps positions and sizes, defaults unknown values", () => {
-    const spec = parseScene(JSON.stringify({ backdrop: "moon", objects: [{ shape: "dodecahedron", color: "blue", position: [1e9, 0, "x"], size: [-5, 2, 2] }] }));
-    const o = spec?.objects[0];
+  it("clamps sizes and defaults unknown values", () => {
+    const spec = parseScene(JSON.stringify({ backdrop: "moon", objects: [{ shape: "dodecahedron", color: "blue", position: [1e9, 0, "x"], size: [-5, 2, 2], material: "lava" }] }));
+    const o = spec?.objects.find((x) => x.shape !== "plane");
     expect(spec?.backdrop).toBe("studio");
     expect(o?.shape).toBe("box");
     expect(o?.color).toBe("#3d7bff");
-    expect(o?.position).toEqual([30, 0, 0]);
+    expect(o?.material).toBe("matte");
     expect(o?.size[0]).toBe(0.05);
   });
 
   it("keeps light sources still: a glowing object never orbits", () => {
-    const spec = parseScene(JSON.stringify({ objects: [{ shape: "sphere", glow: true, motion: "orbit", position: [0, 0, 0], size: [2, 2, 2] }, { shape: "sphere", motion: "orbit", orbitRadius: 5, position: [5, 0, 0], size: [1, 1, 1] }] }));
+    const spec = parseScene(JSON.stringify({ backdrop: "space", objects: [{ shape: "planet", glow: true, motion: "orbit", position: [0, 0, 0], size: [2, 2, 2] }, { shape: "planet", motion: "orbit", orbitRadius: 5, position: [5, 0, 0], size: [1, 1, 1] }] }));
     expect(spec?.objects.map((o) => o.motion)).toEqual(["spin", "orbit"]);
     if (!spec) throw new Error("expected a spec");
     expect(sceneRadius(spec)).toBeGreaterThanOrEqual(5);
     expect(parseScene(JSON.stringify({ objects: [] }))).toBeUndefined();
+  });
+
+  it("composes a messy scene: scaled, grounded, apart, with a floor", () => {
+    // What a small model really wrote: three 30 m towers on one spot, a car inside them.
+    const spec = parseScene(
+      JSON.stringify({
+        backdrop: "night",
+        objects: [
+          { shape: "building", position: [0, 10, 0], size: [12, 30, 12], motion: "none" },
+          { shape: "building", position: [0, 10, 0], size: [10, 25, 10], motion: "none" },
+          { shape: "building", position: [0, 10, 0], size: [12, 20, 12], motion: "none" },
+          { shape: "car", position: [0, 0, 0], size: [3, 1.5, 1.5], motion: "orbit" },
+          { shape: "cloud", position: [0, 1, 0], size: [10, 0.5, 10], motion: "none" },
+        ],
+      }),
+    );
+    if (!spec) throw new Error("expected a spec");
+    const towers = spec.objects.filter((o) => o.shape === "building");
+    expect(Math.max(...towers.map((o) => o.size[1]))).toBeLessThanOrEqual(6.01);
+    for (const t of towers) expect(t.position[1]).toBeCloseTo(t.size[1] / 2, 5);
+    for (let i = 0; i < towers.length; i += 1)
+      for (let j = i + 1; j < towers.length; j += 1) {
+        const a = towers[i];
+        const b = towers[j];
+        if (!a || !b) continue;
+        expect(Math.hypot(a.position[0] - b.position[0], a.position[2] - b.position[2])).toBeGreaterThan(Math.max(a.size[0], b.size[0]) * 0.9);
+      }
+    const car = spec.objects.find((o) => o.shape === "car");
+    const cloud = spec.objects.find((o) => o.shape === "cloud");
+    expect(car?.orbitRadius).toBeGreaterThan(2);
+    expect(cloud?.position[1]).toBeGreaterThan(Math.max(...towers.map((o) => o.size[1])));
+    expect(spec.objects.some((o) => o.shape === "plane")).toBe(true);
+  });
+});
+
+/** Every design must be well-formed XML: a repeated attribute makes the browser drop the whole image. */
+function assertWellFormed(svg: string): void {
+  for (const tag of svg.match(/<[a-zA-Z][^>]*>/g) ?? []) {
+    const names = [...tag.matchAll(/\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)=/g)].map((m) => m[1]);
+    expect(new Set(names).size, tag.slice(0, 120)).toBe(names.length);
+  }
+  const opens = (svg.match(/<(g|svg|text|defs|clipPath|linearGradient|radialGradient|pattern)[\s>]/g) ?? []).length;
+  const closes = (svg.match(/<\/(g|svg|text|defs|clipPath|linearGradient|radialGradient|pattern)>/g) ?? []).length;
+  expect(opens).toBe(closes);
+}
+
+describe("designed slides and charts", () => {
+  const items = [
+    { icon: "📉", title: "Stock-outs", text: "14% of sales lost" },
+    { icon: "🗑️", title: "Waste", text: "₹3,800 a month" },
+    { icon: "", title: "Paper", text: "92% use registers" },
+  ];
+  const layouts: Array<Record<string, unknown>> = [
+    { layout: "title", title: "A <bold> & \"quoted\" title", subtitle: "Sub" },
+    { layout: "agenda", title: "Agenda", items },
+    { layout: "cards", title: "Problem", items },
+    { layout: "stats", title: "Market", stats: [{ value: "63M", label: "stores", delta: "+4%" }, { value: "₹74L Cr", label: "spend", delta: "-1%" }] },
+    { layout: "chart", title: "Traction", subtitle: "6x", chart: { type: "area", labels: ["a", "b", "c"], series: [{ name: "x", values: [1, 2, 3] }] } },
+    { layout: "timeline", title: "Roadmap", items },
+    { layout: "compare", title: "Why", columns: [{ title: "Old", items: ["slow"] }, { title: "New", items: ["fast"] }] },
+    { layout: "quote", title: "Say", quote: { text: "Great", author: "Ana" } },
+    { layout: "closing", title: "Ask", items },
+  ];
+
+  it("draws every layout in every theme as well-formed SVG, escaping text", () => {
+    for (const theme of SLIDE_THEMES) {
+      for (const l of layouts) {
+        const spec = parseSlide(JSON.stringify({ ...l, theme, deck: "Deck", index: 1, total: 9 }));
+        expect(spec?.layout).toBe(l.layout);
+        if (!spec) continue;
+        const svg = slideSvg(spec, 960, 540);
+        assertWellFormed(svg);
+        expect(svg).not.toContain("<bold>");
+      }
+    }
+  });
+
+  it("falls back to a layout that has content", () => {
+    expect(parseSlide(JSON.stringify({ layout: "chart", title: "No data", items }))?.layout).toBe("cards");
+    expect(parseSlide(JSON.stringify({ layout: "stats", title: "Nothing" }))?.layout).toBe("title");
+    expect(parseSlide(JSON.stringify({ layout: "cards" }))).toBeUndefined();
+  });
+
+  it("draws every chart type as well-formed SVG, with KPIs and insight", () => {
+    for (const type of CHART_TYPES) {
+      const spec = parseChart(JSON.stringify({ type, title: "T", unit: "$k", kpis: [{ label: "Total", value: "$4.2M", delta: "+38%" }], insight: "Up and to the right.", labels: ["a", "b", "c", "d", "e"], series: [{ name: "x", values: [3, 5, 2, 8, 6] }, { name: "y", values: [1, 2, 3, 4, 5] }] }));
+      if (!spec) throw new Error("expected a spec");
+      const svg = chartSvg(spec, 860, 600, CHART_THEMES.dark);
+      assertWellFormed(svg);
+      expect(svg).toContain("Up and to the right.");
+    }
   });
 });

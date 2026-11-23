@@ -29,8 +29,8 @@ import {
  * It also keeps this replica's undo/redo history (see "Selective undo" below).
  */
 
-export type ShapeKind = "rect" | "ellipse" | "diamond" | "text" | "frame" | "arrow" | "path" | "comment" | "chart" | "scene3d";
-export const SHAPE_KINDS: readonly ShapeKind[] = ["rect", "ellipse", "diamond", "text", "frame", "arrow", "path", "comment", "chart", "scene3d"];
+export type ShapeKind = "rect" | "ellipse" | "diamond" | "text" | "frame" | "arrow" | "path" | "comment" | "chart" | "scene3d" | "slide";
+export const SHAPE_KINDS: readonly ShapeKind[] = ["rect", "ellipse", "diamond", "text", "frame", "arrow", "path", "comment", "chart", "scene3d", "slide"];
 
 export interface ShapeProps {
   readonly kind: ShapeKind;

@@ -14,6 +14,7 @@ import { Notice } from "../ui/Presence";
 import { PresentMode } from "../ui/PresentMode";
 import { RadialMenu } from "../ui/RadialMenu";
 import { RitualsPanel, TimerPill } from "../ui/Rituals";
+import { Reveal } from "../ui/Reveal";
 import { Scenes3D } from "../ui/Scenes3D";
 import { ShareDialog } from "../ui/ShareDialog";
 import { TeamBar } from "../ui/TeamBar";
@@ -104,6 +105,7 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
       <div className="absolute transition-[left,right,top] duration-300 ease-out" style={inset}>
         <div ref={hostRef} className="absolute inset-0" />
         <Scenes3D editor={editor} />
+        <Reveal editor={editor} />
         {chrome && (
           <div className="pointer-events-none absolute inset-0">
             <EmptyState editor={editor} />

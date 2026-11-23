@@ -27,7 +27,7 @@ links, and an AI that runs on your own machine.
 
 | Area | What you can do |
 |---|---|
-| **Homepage** (`/`) | A cinematic 3D scroll story (Three.js + GSAP ScrollTrigger + Lenis, bloom): the camera flies through a living board while eight named cursors work on it — notes assemble, get dragged into a mind map, the board splits into two offline devices and merges with a shockwave, rewinds inside a clock ring, and AI cards stream out of a glowing orb |
+| **Homepage** (`/`) | A cinematic 3D scroll story (Three.js + GSAP ScrollTrigger + Lenis, bloom): the camera flies through a living board while eight named cursors work on it — notes assemble, get dragged into a mind map, the board splits into two offline devices and merges with a shockwave, rewinds inside a clock ring, and AI cards stream out of a glowing orb. Then an **AI Studio** gallery (pinned horizontal scroll) where real decks, charts and a live 3D scene build themselves in, and a marquee of real template previews |
 | **Dashboard** (`/boards`) | Your boards with thumbnails, search, star, join by link; start blank or from a template (kanban, retro, flowchart, mind map, brainstorm) |
 | **Editing** | Notes, rectangles, ellipses, diamonds, text, frames, pen, comments; **connectors that stay attached**; resize and rotate handles; snapping with alignment guides; align and distribute; copy, paste (text becomes a note), duplicate, Alt-drag to copy; frames carry their contents; wrap a selection in a frame; nudge with arrow keys; minimap and zoom controls; **⌘K command palette** for everything |
 | **Together** | Live cursors and selections, **cursor chat** (`/`), **emoji reactions** (1–6), **follow a teammate's view** (click their avatar), live text as people type, synced board name, an **AI team session** (8 bot teammates brainstorm, sort and vote on a topic in their own frame beside your board) |
@@ -36,7 +36,8 @@ links, and an AI that runs on your own machine.
 | **Offline & history** | Works with no connection (edits queue on the device and merge later), selective undo (only your own edits), **time travel** slider with restore |
 | **Share & export** | Edit and view-only links (server-signed when auth is on), **PNG / SVG / PDF** export of the board or the selection |
 | **Layout** | Pro editor: header with Present/Share, left sidebar (**Pages**, **Layers** with search, **Templates**), right panel with **Design** (exact color, position, size, rotation, text, arrange) and **AI** |
-| **AI (local)** | **Detailed plans** (phases as frames; cards with detail, owner, due date, priority), **flowcharts and mind maps** with real connectors, **charts** (bar, line, area, pie, donut, funnel), **interactive 3D scenes**, **slide decks** that play in Present mode with animated reveals, summaries with what's missing; choose the local model in the panel |
+| **AI (local)** | **Designed slide decks** (6 themes, 9 layouts: title, agenda, cards, big numbers, chart, timeline, comparison, quote, closing) that play in Present mode and build in, **charts** with KPIs and an insight (bar, ranking, stacked, line, area, pie, donut, funnel, radar), **3D scenes** with ready-made models, real lighting and glow, composed so they always read well, **detailed plans**, **flowcharts and mind maps**, summaries; choose the local model in the panel (qwen3:4b by default) |
+| **Templates** | Finished examples, not skeletons: an 8-slide **pitch deck**, a **metrics dashboard** (4 charts), a **product roadmap**, a **3D explainer**, plus kanban, retro, flowchart, mind map and brainstorm |
 
 ## How it fits together
 

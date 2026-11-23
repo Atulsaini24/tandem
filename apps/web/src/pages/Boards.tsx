@@ -179,6 +179,7 @@ export default function Boards() {
               >
                 <div className="relative aspect-[4/3] overflow-hidden" style={{ backgroundColor: `${hex(t.color)}14` }}>
                   <img src={previews.get(t.id)} alt="" className="absolute inset-0 h-full w-full object-contain p-3 transition-transform duration-500 group-hover:scale-110" />
+                  {t.tag && <span className="absolute left-2.5 top-2.5 rounded-full px-2 py-0.5 text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: hex(t.color) }}>{t.tag}</span>}
                 </div>
                 <div className="px-3.5 py-3">
                   <p className="text-[13px] font-bold text-ink">{t.name}</p>

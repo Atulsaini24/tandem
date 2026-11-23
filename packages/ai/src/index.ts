@@ -55,4 +55,5 @@ export {
   runJson,
   type DeckEvent,
   type DeckSlide,
+  SCENE_MODELS,
 } from "./creative.js";

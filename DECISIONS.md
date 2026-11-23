@@ -586,3 +586,40 @@ installed models (best first, too-large ones flagged) and remembers the choice. 
 models are asked not to think out loud (`think: false`): with a fixed output schema,
 the hidden reasoning costs minutes and adds nothing. The context window is 4096 tokens to
 keep memory use within a laptop's budget.
+
+## D067 — Slides and charts are designed SVG, not assembled from shapes
+AI decks used to be built from canvas primitives (text boxes, colored rects), which made
+them look like sticky notes. A new `slide` shape kind stores a slide spec (theme, layout and
+content) and `slides.ts` draws it the way a design tool would: six themes (midnight, aurora,
+sunset, paper, ocean, noir), nine layouts (title, agenda, cards, stats, chart, quote,
+timeline, compare, closing), gradients, real typography, numbering and a footer. Charts got
+the same treatment: KPI tiles, an insight callout, smooth curves, highlighted leaders and
+nine types (adding ranking bars, stacked bars and radar). Text is measured with a fixed
+width table, not the DOM, so the canvas texture, export and tests agree exactly. Designs use
+system fonts only: an SVG drawn as an image can't load the page's web fonts, and the live
+overlay (D068) must match the still texture. The trade-off: a slide is edited as a whole
+(theme in the Design tab, content by asking again), not box by box.
+
+## D068 — Build-in animation is the same SVG, laid over the canvas for a few seconds
+The canvas shows designed shapes as a still texture. When one appears, or Present mode lands
+on it, `Reveal.tsx` lays the identical SVG over it as live DOM for about three seconds, and
+CSS animates the parts tagged in the markup (`a-grow` bars, `a-draw` lines, `a-up` cards).
+Then the overlay goes and the still is the same picture. This gives motion without
+animating thousands of Pixi objects, and the animation can never disagree with the result.
+
+## D069 — 3D scenes are composed by code after the model writes them
+A small local model writes 3D specs with every object at the origin, 30 m towers and a
+10 cm drone. Prompting alone didn't fix that, so `compose()` makes any spec read well:
+rescale so the largest object is about 6 m, fix model proportions (towers taller than wide,
+round trees, puffy clouds), put things on the ground, lift flyers above the rooftops, push
+footprints apart, route orbits around what they circle, and add a ground. It runs in the
+parser, so every viewer sees the same scene. Ready-made models (planet, tree, building,
+rocket, car, server and more) and real lighting (sky, sunset, night, studio; reflections
+from light panels, bloom) do the rest. No assets are downloaded.
+
+## D070 — qwen3:4b is the default model; decks get today's date
+qwen3:4b runs at about 19 tokens/s here (12 when its output is long), against 2 for
+qwen3:8b, and its schema-constrained output is good enough for every mode: a chart takes
+about 30 s, an 8-slide deck about 2.5 minutes. Prompts now state today's date, since models
+otherwise date roadmaps in their training year.
+

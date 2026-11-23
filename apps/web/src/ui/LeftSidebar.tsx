@@ -22,6 +22,7 @@ const KIND_ICON: Record<ShapeView["kind"], IconName> = {
   comment: "comment",
   chart: "chart",
   scene3d: "cube",
+  slide: "slides",
 };
 
 const describe = (s: ShapeView): string => {
@@ -148,7 +149,10 @@ export function LeftSidebar({ editor, open, onToggle }: { editor: Editor | null;
                       onClick={() => editor?.insertTemplate(t.id, editor.freeSpotCenter(1200, 700))}
                       className="w-full rounded-xl border border-line bg-field p-3 text-left hover:border-ink/30"
                     >
-                      <span className="mb-1.5 block h-1.5 w-8 rounded-full" style={{ backgroundColor: hex(t.color) }} />
+                      <span className="mb-1.5 flex items-center gap-2">
+                        <span className="block h-1.5 w-8 rounded-full" style={{ backgroundColor: hex(t.color) }} />
+                        {t.tag && <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ color: hex(t.color), backgroundColor: `${hex(t.color)}1f` }}>{t.tag}</span>}
+                      </span>
                       <span className="block text-[13px] font-bold text-ink">{t.name}</span>
                       <span className="block text-[11px] leading-snug text-muted">{t.blurb}</span>
                     </button>

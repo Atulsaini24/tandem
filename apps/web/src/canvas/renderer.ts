@@ -13,7 +13,8 @@ import {
 import type { Peer, Peers } from "./peers";
 import type { Scene } from "./scene";
 import { CANVAS_THEMES, displayFill, inkColor, labelColor, type CanvasTheme } from "./theme";
-import { CHART_THEMES, chartSvg, parseChart, sceneCardSvg } from "./charts";
+import { CHART_THEMES } from "./charts";
+import { designSvg } from "./export";
 import { clampZoom, panBy, screenToWorld, stepZoom, worldToScreen, type Point, type Viewport } from "./viewport";
 
 /** Geometry a node is drawn with right now (it may be mid-animation). */
@@ -636,6 +637,7 @@ export class Renderer {
       case "text":
         return "none";
       case "chart":
+      case "slide":
       case "scene3d":
         return "svg";
       default:
@@ -764,7 +766,7 @@ export class Renderer {
 
   #syncLabel(node: ShapeNode): void {
     const view = node.view;
-    const text = view.kind === "arrow" || view.kind === "frame" || view.kind === "path" || view.kind === "chart" || view.kind === "scene3d" ? undefined : view.label;
+    const text = view.kind === "arrow" || view.kind === "frame" || view.kind === "path" || view.kind === "chart" || view.kind === "scene3d" || view.kind === "slide" ? undefined : view.label;
     if (!text) {
       node.label?.destroy();
       node.label = undefined;
@@ -928,13 +930,7 @@ export class Renderer {
     const key = `${view.kind}|${view.data ?? ""}|${view.label ?? ""}|${width}|${height}|${this.#theme.name}`;
     if (key === node.svgKey) return;
     node.svgKey = key;
-    const svg =
-      view.kind === "chart"
-        ? (() => {
-            const spec = parseChart(view.data);
-            return spec ? chartSvg(spec, width, height, CHART_THEMES[this.#theme.name]) : sceneCardSvg("Chart: no data", width, height);
-          })()
-        : sceneCardSvg(view.label ?? "3D scene", width, height);
+    const svg = designSvg(view.kind, view.data, view.label, width, height, CHART_THEMES[this.#theme.name]);
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
     const image = new Image();
     image.onload = () => {

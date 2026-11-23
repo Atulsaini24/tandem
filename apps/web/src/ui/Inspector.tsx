@@ -1,7 +1,8 @@
 import type { ShapeView } from "@canvas/doc";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { CHART_TYPES, parseChart, type ChartType } from "../canvas/charts";
+import { CHART_TYPE_NAMES, CHART_TYPES, parseChart, type ChartType } from "../canvas/charts";
+import { parseSlide, SLIDE_THEMES, THEMES, type SlideThemeName } from "../canvas/slides";
 import { PALETTE, type Editor } from "../canvas/editor";
 import { NOTE_COLORS } from "../canvas/templates";
 import { hex } from "../canvas/theme";
@@ -90,14 +91,31 @@ function DesignTab({ editor }: { editor: Editor }) {
   }
 
   const chart = one?.kind === "chart" ? parseChart(one.data) : undefined;
-  const setChartType = (type: ChartType): void => {
+  const slide = one?.kind === "slide" ? parseSlide(one.data) : undefined;
+  const patchData = (patch: Record<string, unknown>): void => {
     if (!one?.data) return;
     try {
       const data = JSON.parse(one.data) as Record<string, unknown>;
-      editor.updateShapes([{ id: one.id, patch: { data: JSON.stringify({ ...data, type }) } }]);
+      editor.updateShapes([{ id: one.id, patch: { data: JSON.stringify({ ...data, ...patch }) } }]);
+      useUiStore.getState().reveal([one.id]);
     } catch {
       // unparseable: leave it
     }
+  };
+  const setChartType = (type: ChartType): void => patchData({ type });
+  /** A deck shares one theme: restyle every slide of the same deck. */
+  const setSlideTheme = (theme: SlideThemeName): void => {
+    if (!slide) return;
+    const same = editor.scene.ordered().filter((s) => s.kind === "slide" && parseSlide(s.data)?.deck === slide.deck);
+    const updates = same.flatMap((s) => {
+      try {
+        return [{ id: s.id, patch: { data: JSON.stringify({ ...(JSON.parse(s.data ?? "{}") as Record<string, unknown>), theme }) } }];
+      } catch {
+        return [];
+      }
+    });
+    editor.updateShapes(updates, editor.beginGroup());
+    useUiStore.getState().reveal(updates.map((u) => u.id));
   };
 
   return (
@@ -133,7 +151,7 @@ function DesignTab({ editor }: { editor: Editor }) {
         </Section>
       )}
 
-      {one && one.kind !== "path" && one.kind !== "chart" && one.kind !== "scene3d" && (
+      {one && one.kind !== "path" && one.kind !== "chart" && one.kind !== "scene3d" && one.kind !== "slide" && (
         <Section title="Text">
           <textarea
             value={text}
@@ -152,13 +170,40 @@ function DesignTab({ editor }: { editor: Editor }) {
         <Section title="Chart">
           <div className="grid grid-cols-3 gap-1.5">
             {CHART_TYPES.map((t) => (
-              <button key={t} type="button" onClick={() => setChartType(t)} className={`h-8 rounded-lg text-[12px] font-semibold capitalize ${chart.type === t ? "bg-ink text-paper" : "border border-line text-ink hover:bg-hover"}`}>
-                {t}
+              <button key={t} type="button" onClick={() => setChartType(t)} className={`h-8 rounded-lg text-[12px] font-semibold ${chart.type === t ? "bg-ink text-paper" : "border border-line text-ink hover:bg-hover"}`}>
+                {CHART_TYPE_NAMES[t]}
               </button>
             ))}
           </div>
           <p className="mt-2 text-[11px] text-muted">
             {chart.series.length} series · {chart.labels.length} points{chart.unit ? ` · ${chart.unit}` : ""}
+          </p>
+        </Section>
+      )}
+
+      {slide && one && (
+        <Section title="Slide theme">
+          <div className="grid grid-cols-3 gap-1.5">
+            {SLIDE_THEMES.map((name) => {
+              const t = THEMES[name];
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  title={`Apply ${name} to the whole deck`}
+                  onClick={() => setSlideTheme(name)}
+                  className={`overflow-hidden rounded-lg border text-left ${slide.theme === name ? "border-accent ring-2 ring-accent/40" : "border-line hover:border-ink/30"}`}
+                >
+                  <span className="block h-9" style={{ background: `linear-gradient(135deg, ${t.bg1}, ${t.bg2})` }}>
+                    <span className="ml-2 mt-2 inline-block h-1.5 w-8 rounded-full" style={{ background: `linear-gradient(90deg, ${t.accent}, ${t.accent2})` }} />
+                  </span>
+                  <span className="block px-1.5 py-1 text-[10px] font-semibold capitalize text-ink">{name}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[11px] text-muted">
+            {slide.layout} layout{slide.deck ? ` · ${slide.deck}` : ""}
           </p>
         </Section>
       )}

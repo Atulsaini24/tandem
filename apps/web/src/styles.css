@@ -92,3 +92,47 @@ canvas {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Build-in animations for designed shapes (charts, slides) — see ui/Reveal.tsx. */
+.reveal svg { display: block; overflow: visible; }
+.reveal .a-up, .reveal .a-fade, .reveal .a-pop, .reveal .a-left, .reveal .a-right, .reveal .a-grow, .reveal .a-growx, .reveal .a-growx-c, .reveal .a-draw, .reveal .a-spin, .reveal .a-scale, .reveal .a-glow {
+  animation-duration: 0.75s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+  animation-delay: calc(var(--base, 0ms) + var(--d, 0ms));
+}
+.reveal .a-up { animation-name: rv-up; }
+.reveal .a-fade { animation-name: rv-fade; }
+.reveal .a-left { animation-name: rv-left; }
+.reveal .a-right { animation-name: rv-right; }
+.reveal .a-pop { animation-name: rv-pop; transform-box: fill-box; transform-origin: center; }
+.reveal .a-spin { animation-name: rv-pop; transform-box: fill-box; transform-origin: center; animation-duration: 0.9s; }
+.reveal .a-grow { animation-name: rv-grow; transform-box: fill-box; transform-origin: 50% 100%; animation-duration: 0.9s; }
+.reveal .a-growx { animation-name: rv-growx; transform-box: fill-box; transform-origin: 0 50%; animation-duration: 0.9s; }
+.reveal .a-growx-c { animation-name: rv-growx; transform-box: fill-box; transform-origin: 50% 50%; }
+.reveal .a-scale { animation-name: rv-scale; animation-duration: 1s; }
+.reveal .a-draw { animation-name: rv-draw; stroke-dasharray: 1; animation-duration: 1.4s; animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1); }
+.reveal .a-glow { animation-name: rv-glow; animation-duration: 1.6s; transform-box: fill-box; transform-origin: center; }
+@keyframes rv-up { from { opacity: 0; transform: translateY(16px); } }
+@keyframes rv-fade { from { opacity: 0; } }
+@keyframes rv-left { from { opacity: 0; transform: translateX(-18px); } }
+@keyframes rv-right { from { opacity: 0; transform: translateX(18px); } }
+@keyframes rv-pop { from { opacity: 0; transform: scale(0.55); } }
+@keyframes rv-grow { from { transform: scaleY(0); } }
+@keyframes rv-growx { from { transform: scaleX(0); } }
+@keyframes rv-scale { from { opacity: 0; transform: scale(0); } }
+@keyframes rv-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes rv-glow { from { opacity: 0; transform: scale(0.6); } }
+@media (prefers-reduced-motion: reduce) {
+  .reveal * { animation: none !important; }
+}
+
+/* Homepage: AI Studio gallery and template marquee. */
+.showcase-art svg { width: 100%; height: 100%; display: block; }
+@keyframes marquee-left { to { transform: translateX(-50%); } }
+@keyframes marquee-right { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+.marquee-left { animation: marquee-left 60s linear infinite; }
+.marquee-right { animation: marquee-right 70s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .marquee-left, .marquee-right { animation: none; }
+}

@@ -74,10 +74,12 @@ the current milestone passes its gate.
   would skip the dialog.
 - **Board registry across devices:** the dashboard lists boards this browser has opened. With
   sign-in, list them from the server.
-- **Faster smart model:** qwen3:8b runs at ~2 tokens/s on a 4 GB GPU. qwen3:4b (done: now the default, ~19 tok/s here) (~2.6 GB) would
-  fit in GPU memory and likely run several times faster with better answers than gemma3:4b.
 - **Editable chart data:** charts can change type in the Design tab; editing the numbers needs a
   small data grid.
 - **3D scene editing:** scenes are generated whole; selecting and moving individual 3D objects
   needs picking and a gizmo.
 - **Layers panel:** rename, lock and hide per layer; drag to reorder.
+- **Slide editing:** a designed slide is edited as a whole (theme, or ask the AI again). Click
+  a title or card to edit its text in place.
+- **Deck speed:** an 8-slide deck takes ~2.5 min on qwen3:4b. Writing an outline first and
+  the slides in parallel requests would show the first slides sooner.

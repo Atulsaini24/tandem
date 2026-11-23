@@ -7,6 +7,7 @@ import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "rea
 import { newBoardId, upsertBoard } from "../boards";
 import { linkProps, navigate } from "../router";
 import { Icon, Logo, type IconName } from "../ui/kit";
+import { Showcase, TemplateMarquee } from "./home/Showcase";
 import { CHAPTERS } from "./home/story";
 import type { StoryState } from "./home/Scene";
 
@@ -35,8 +36,8 @@ const STORY: ReadonlyArray<{ kicker: string; title: string; accent: string; body
   { kicker: "02 · Many hands", title: "Eight people.", accent: "One board. Zero waiting.", body: "Every cursor is a real person working at the same time — dragging, typing, connecting. No locks, no turns, no “someone else is editing”.", side: "right", icon: "hand" },
   { kicker: "03 · Offline", title: "Lose the signal.", accent: "Keep the flow.", body: "Each device keeps working on its own copy. When they reconnect, every change merges — mathematically guaranteed, nothing overwritten.", side: "left", icon: "link" },
   { kicker: "04 · Time travel", title: "Rewind to", accent: "any moment.", body: "Every edit is kept in order. Scrub back through the board's whole life, then restore any version in one click — and undo that too.", side: "right", icon: "history" },
-  { kicker: "05 · Local AI", title: "An assistant that", accent: "never phones home.", body: "Ask for a plan, a flowchart or a mind map and watch it stream onto the canvas. Summaries and “what's missing”, all running on your own machine.", side: "left", icon: "sparkle" },
-  { kicker: "06 · Yours", title: "Every board,", accent: "every idea, connected.", body: "Templates, present mode, export to PNG, SVG and PDF, signed share links, a command palette for everything. Free, private, and fast.", side: "right", icon: "star" },
+  { kicker: "05 · Local AI", title: "Ask for a deck.", accent: "Get a designed one.", body: "Slide decks with real layouts, charts with KPIs and insights, live 3D scenes, detailed plans, flowcharts and mind maps — streamed onto the canvas by an AI running on your own machine.", side: "left", icon: "sparkle" },
+  { kicker: "06 · Pro", title: "A real editor,", accent: "not a toy.", body: "Pages and layers on the left, an inspector with exact numbers on the right, finished templates, present mode, PNG · SVG · PDF export and signed share links. Free, private and fast.", side: "right", icon: "star" },
 ];
 
 /** A button that leans toward the pointer. */
@@ -82,6 +83,7 @@ function Nav() {
         </a>
         <nav className="ml-6 hidden items-center gap-7 text-[13px] font-semibold text-white/60 md:flex">
           <a href="#story" className="transition-colors hover:text-white">Story</a>
+          <a href="#ai" className="transition-colors hover:text-white">AI Studio</a>
           <a href="#features" className="transition-colors hover:text-white">Features</a>
           <a href="#engine" className="transition-colors hover:text-white">Engine</a>
           <button type="button" onClick={() => startDemo("kanban")} className="transition-colors hover:text-white">Live demo</button>
@@ -97,10 +99,10 @@ function Nav() {
 }
 
 /** Right-edge progress rail: where you are in the story; click to jump. */
-function Rail({ active, onJump }: { active: number; onJump: (i: number) => void }) {
+function Rail({ active, onJump, visible }: { active: number; onJump: (i: number) => void; visible: boolean }) {
   const labels = ["Intro", ...STORY.map((s) => s.kicker.split("· ")[1] ?? "")];
   return (
-    <div className="pointer-events-auto fixed right-5 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-3 lg:flex">
+    <div className={`fixed right-5 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-3 transition-opacity duration-500 lg:flex ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>
       {labels.map((label, i) => (
         <button key={label} type="button" onClick={() => onJump(i)} className="group flex items-center justify-end gap-3" aria-label={`Go to ${label}`}>
           <span className={`text-[11px] font-bold uppercase tracking-[0.12em] transition-all duration-300 ${active === i ? "text-white opacity-100" : "translate-x-2 text-white/50 opacity-0 group-hover:translate-x-0 group-hover:opacity-100"}`}>{label}</span>
@@ -115,6 +117,7 @@ function Story({ lenis }: { lenis: React.MutableRefObject<Lenis | null> }) {
   const section = useRef<HTMLElement>(null);
   const story = useRef<StoryState>({ target: 0, t: 0, time: 0, poses: [] });
   const [active, setActive] = useState(0);
+  const [inside, setInside] = useState(true);
   const [webgl] = useState(supportsWebGL);
   const [showScene, setShowScene] = useState(false);
 
@@ -127,6 +130,9 @@ function Story({ lenis }: { lenis: React.MutableRefObject<Lenis | null> }) {
         trigger: el,
         start: "top top",
         end: "bottom bottom",
+        onToggle: (self) => setInside(self.isActive || self.progress === 0),
+        // A reload can land anywhere on the page: start in the right state.
+        onRefresh: (self) => setInside(self.isActive || self.progress === 0),
         onUpdate: (self) => {
           story.current.target = self.progress * (CHAPTERS - 1);
           setActive(Math.min(CHAPTERS - 1, Math.round(self.progress * (CHAPTERS - 1))));
@@ -176,14 +182,14 @@ function Story({ lenis }: { lenis: React.MutableRefObject<Lenis | null> }) {
         )}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#05060a] to-transparent" />
       </div>
-      <Rail active={active} onJump={jump} />
+      <Rail active={active} onJump={jump} visible={inside} />
 
       <div className="pointer-events-none absolute inset-0">
         <div className="flex h-screen items-center justify-center px-5">
           <div data-hero className="pointer-events-auto max-w-5xl text-center">
             <a data-hero-fade {...linkProps("/boards")} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 py-1.5 pl-1.5 pr-4 text-[12px] font-semibold text-white/80 backdrop-blur-md transition-colors hover:bg-white/10">
               <span className="rounded-full bg-gradient-to-r from-[#2f63ff] to-[#ff8a5b] px-2 py-0.5 text-[10px] font-extrabold text-white">NEW</span>
-              Present mode, laser pointer, voting & a crowd of live cursors
+              AI Studio: designed decks, live charts & 3D scenes
             </a>
             <h1 data-hero-title className="mt-7 font-display text-[clamp(56px,10vw,148px)] leading-[0.88] tracking-[-0.02em] text-white">
               <span data-hero-split className="block">Think together.</span>
@@ -244,7 +250,7 @@ function Numbers() {
     { value: <CountUp to={5000} suffix="+" />, label: "shapes at 60 fps", detail: "WebGL batching, engine in a Web Worker" },
     { value: <CountUp to={0} />, label: "merge conflicts", detail: "CRDTs written from scratch: move tree, LWW maps, Fugue" },
     { value: <CountUp to={100} suffix="%" />, label: "works offline", detail: "IndexedDB journal, merges on reconnect" },
-    { value: <CountUp to={190} suffix="+" />, label: "automated tests", detail: "Property-based: thousands of random edit orders" },
+    { value: <CountUp to={200} suffix="+" />, label: "automated tests", detail: "Property-based: thousands of random edit orders" },
   ];
   return (
     <section className="relative border-y border-white/10 bg-[#07080d]">
@@ -262,14 +268,16 @@ function Numbers() {
 }
 
 const FEATURES: ReadonlyArray<{ icon: IconName; title: string; body: string; span?: string; tint: string }> = [
-  { icon: "eye", title: "Present mode", body: "Frames become slides. The camera flies between them while everyone follows along — with a glowing laser pointer.", span: "sm:col-span-2 lg:row-span-2", tint: "#7b6cff" },
-  { icon: "arrow", title: "Quick-connect", body: "Hover a shape, click a + and the next step appears already connected.", tint: "#2f63ff" },
+  { icon: "eye", title: "Present mode", body: "Frames become slides. The camera flies between them, designed slides build themselves in, and everyone follows along — with a glowing laser pointer.", span: "sm:col-span-2 lg:row-span-2", tint: "#7b6cff" },
+  { icon: "panel", title: "Pro editor", body: "Pages, layers, and an inspector with exact X, Y, size and rotation.", tint: "#2f63ff" },
+  { icon: "chart", title: "Charts that build in", body: "Nine chart types with KPIs and insights. Bars grow, lines draw.", tint: "#22c3a6" },
+  { icon: "cube", title: "3D on the canvas", body: "Planets, cities, rockets — lit, glowing, and yours to orbit.", tint: "#b36bff" },
+  { icon: "slides", title: "Designed decks", body: "Six themes and nine layouts: title, agenda, cards, big numbers, charts, timelines, comparisons, quotes and a closing ask. Restyle a whole deck in one click.", span: "sm:col-span-2", tint: "#ff7a59" },
+  { icon: "arrow", title: "Quick-connect", body: "Hover a shape, click a + and the next step appears already connected.", tint: "#38b6ff" },
   { icon: "star", title: "Dot voting & timer", body: "Run a retro in minutes: vote on notes, share a countdown.", tint: "#ffb020" },
-  { icon: "chat", title: "Cursor chat & reactions", body: "Talk right where you're pointing. Reactions float up on every screen.", tint: "#ff4f8b" },
-  { icon: "search", title: "Follow & spotlight", body: "Ride along with a teammate, or pull everyone to your view.", tint: "#19c3a5" },
-  { icon: "command", title: "Everything in ⌘K", body: "Every tool, template and action, a few keystrokes away.", span: "sm:col-span-2", tint: "#ff6a3d" },
+  { icon: "command", title: "Everything in ⌘K", body: "Every tool, template and action, a few keystrokes away — plus cursor chat, reactions, follow and spotlight.", span: "sm:col-span-2", tint: "#ff4f8b" },
   { icon: "download", title: "PNG · SVG · PDF", body: "Vector-perfect export of the board or just the selection.", tint: "#52d36b" },
-  { icon: "share", title: "Signed share links", body: "Edit or view-only, enforced by the server.", tint: "#e85cff" },
+  { icon: "share", title: "Signed share links", body: "Edit or view-only, enforced by the server. Works offline, merges on reconnect.", span: "sm:col-span-2", tint: "#e85cff" },
 ];
 
 /** Cards with a light that follows the pointer and a slight 3D tilt. */
@@ -282,7 +290,7 @@ function Features() {
           Pro tools. <em className="bg-gradient-to-r from-[#9fb8ff] to-[#ffb08f] bg-clip-text text-transparent">Zero clutter.</em>
         </h2>
       </motion.div>
-      <div className="mt-14 grid auto-rows-[220px] grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-14 grid auto-rows-[minmax(220px,auto)] grid-flow-dense grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {FEATURES.map((f, i) => (
           <motion.article
             key={f.title}
@@ -434,7 +442,9 @@ export default function Home() {
       <Nav />
       <Story lenis={lenis} />
       <Numbers />
+      <Showcase />
       <Features />
+      <TemplateMarquee onOpen={(id) => startDemo(id)} />
       <Engine />
       <FinalCta />
       <footer className="border-t border-white/10 px-5 py-10 text-[12px] text-white/40">
