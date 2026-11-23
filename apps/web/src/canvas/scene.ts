@@ -29,6 +29,8 @@ export class Scene {
   readonly dirty = new Set<NodeId>();
   orderDirty = false;
   animate = false;
+  /** Bumped on every visible change: panels poll it to know when to re-read. */
+  version = 0;
 
   get previewing(): boolean {
     return this.#preview !== undefined;
@@ -66,6 +68,7 @@ export class Scene {
     for (const id of after.shapes.keys()) if (before.shapes.get(id) !== after.shapes.get(id)) this.dirty.add(id);
     this.orderDirty = true;
     this.animate = true;
+    this.version += 1;
   }
 
   addLocal(shapes: readonly ShapeView[], seq: number): void {
@@ -136,9 +139,11 @@ export class Scene {
   // While previewing, live changes aren't visible, so they don't need a redraw.
   #markDirty(id: NodeId): void {
     if (!this.#preview) this.dirty.add(id);
+    this.version += 1;
   }
 
   #markOrder(): void {
     if (!this.#preview) this.orderDirty = true;
+    this.version += 1;
   }
 }

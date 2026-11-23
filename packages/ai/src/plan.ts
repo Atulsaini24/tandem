@@ -50,6 +50,10 @@ export const BOARD_SCHEMA = {
               type: "object",
               properties: {
                 text: { type: "string" },
+                detail: { type: "string" },
+                owner: { type: "string" },
+                due: { type: "string" },
+                priority: { type: "string", enum: ["high", "medium", "low"] },
                 source: { type: "integer" },
               },
               required: ["text"],
@@ -120,11 +124,16 @@ export function cleanSource(raw: unknown, noteCount: number): number | undefined
   return typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw < noteCount ? raw : undefined;
 }
 
-const SYSTEM = `You are a whiteboard assistant. You arrange ideas as columns of short sticky notes.
+const SYSTEM = `You are an expert planner building a detailed whiteboard plan.
 Reply ONLY with JSON matching the schema:
-- "title": a short board title.
-- "columns": 2 to ${LIMITS.columns} columns, each with a short "title", a "color", and 1 to ${LIMITS.itemsPerColumn} "items".
-- Each item "text" is one short phrase (under 60 characters), no numbering, no markdown.`;
+- "title": a specific board title.
+- "columns": 3 to ${LIMITS.columns} columns (phases, workstreams or themes), each with a short "title", a "color", and 3 to 6 "items".
+- Each item: "text" = a concrete task or idea (under 60 characters, no numbering);
+  "detail" = one sentence on how or why (under 110 characters);
+  "owner" = a role (e.g. "Design lead", "CTO", "Marketing");
+  "due" = when (e.g. "Week 2", "Day 30", "Before launch");
+  "priority" = "high", "medium" or "low".
+Be specific to the request: real tasks, real numbers where useful. No markdown.`;
 
 const ORGANIZE_SYSTEM = `You are a whiteboard assistant. You sort existing numbered sticky notes into columns.
 Reply ONLY with JSON matching the schema:

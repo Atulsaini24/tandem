@@ -13,6 +13,7 @@ import {
 import type { Peer, Peers } from "./peers";
 import type { Scene } from "./scene";
 import { CANVAS_THEMES, displayFill, inkColor, labelColor, type CanvasTheme } from "./theme";
+import { CHART_THEMES, chartSvg, parseChart, sceneCardSvg } from "./charts";
 import { clampZoom, panBy, screenToWorld, stepZoom, worldToScreen, type Point, type Viewport } from "./viewport";
 
 /** Geometry a node is drawn with right now (it may be mid-animation). */
@@ -43,7 +44,10 @@ interface ShapeNode {
   readonly id: NodeId;
   readonly holder: Container;
   body: Sprite | NineSliceSprite | Graphics | undefined;
-  bodyType: "nine" | "circle" | "graphics" | "none";
+  bodyType: "nine" | "circle" | "graphics" | "none" | "svg";
+  /** Charts and 3D cards: what the current texture was drawn from, and the texture. */
+  svgKey: string;
+  svgTexture: Texture | undefined;
   shadow: NineSliceSprite | undefined;
   label: Text | undefined;
   /** Extra text (frame titles, comment authors). */
@@ -575,6 +579,8 @@ export class Renderer {
       pop: undefined,
       badge: undefined,
       badgeKey: "",
+      svgKey: "",
+      svgTexture: undefined,
     };
     this.#nodes.set(view.id, node);
     this.#layer.addChild(holder);
@@ -586,6 +592,8 @@ export class Renderer {
   }
 
   #dispose(node: ShapeNode): void {
+    node.svgTexture?.destroy(true);
+    node.svgTexture = undefined;
     this.#tweens.delete(node);
     this.#dying.delete(node);
     this.#layer.removeChild(node.holder);
@@ -627,6 +635,9 @@ export class Renderer {
         return "circle";
       case "text":
         return "none";
+      case "chart":
+      case "scene3d":
+        return "svg";
       default:
         return "graphics";
     }
@@ -642,13 +653,14 @@ export class Renderer {
       if (type === "nine" && this.#rounded) {
         node.body = new NineSliceSprite({ texture: this.#rounded, leftWidth: 12, rightWidth: 12, topHeight: 12, bottomHeight: 12 });
       } else if (type === "circle" && this.#circle) node.body = new Sprite(this.#circle);
+      else if (type === "svg") node.body = new Sprite(Texture.EMPTY);
       else if (type === "graphics") node.body = new Graphics();
       if (node.body) node.holder.addChildAt(node.body, 0);
       node.bodyType = type;
       node.drawn = "";
     }
     const fill = displayFill(view.fill, this.#theme);
-    if (node.body && !(node.body instanceof Graphics)) node.body.tint = fill;
+    if (node.body && !(node.body instanceof Graphics) && type !== "svg") node.body.tint = fill;
 
     // Labeled cards (sticky notes, AI boards) float on a soft shadow.
     const wantsShadow = view.kind === "rect" && view.label !== undefined;
@@ -752,21 +764,23 @@ export class Renderer {
 
   #syncLabel(node: ShapeNode): void {
     const view = node.view;
-    const text = view.kind === "arrow" || view.kind === "frame" || view.kind === "path" ? undefined : view.label;
+    const text = view.kind === "arrow" || view.kind === "frame" || view.kind === "path" || view.kind === "chart" || view.kind === "scene3d" ? undefined : view.label;
     if (!text) {
       node.label?.destroy();
       node.label = undefined;
       return;
     }
     const big = view.kind === "text";
+    // Text shapes: the font follows the box height (a 40px box is 24px, as before).
+    const textSize = Math.max(14, Math.min(88, Math.round(view.h * 0.6)));
     const comment = view.kind === "comment";
     const fill = big || comment ? this.#theme.ink : view.kind === "diamond" ? labelColor(displayFill(view.fill, this.#theme)) : labelColor(displayFill(view.fill, this.#theme));
     const wrap = comment ? 220 : Math.max(24, view.w - 22);
     const style = {
       fontFamily: FONT,
-      fontSize: big ? 24 : comment ? 14 : 15,
+      fontSize: big ? textSize : comment ? 14 : 15,
       fontWeight: big ? ("700" as const) : ("600" as const),
-      lineHeight: big ? 30 : comment ? 19 : 19,
+      lineHeight: big ? Math.round(textSize * 1.25) : comment ? 19 : 19,
       fill,
       wordWrap: true,
       breakWords: true,
@@ -826,6 +840,7 @@ export class Renderer {
     else if (body) {
       body.position.set(left, top);
       body.setSize(w, h);
+      if (node.bodyType === "svg") this.#rasterize(node, w, h);
     }
     if (node.shadow) {
       node.shadow.position.set(left - 8, top - 3);
@@ -899,6 +914,48 @@ export class Renderer {
       default:
         g.rect(left, top, w, h).fill(fill);
     }
+  }
+
+  /**
+   * Charts and 3D cards are drawn as SVG (charts.ts), rasterized at 2× into a texture.
+   * Re-drawn only when what they show changes; while resizing, the old texture stretches
+   * and the new one lands a moment later.
+   */
+  #rasterize(node: ShapeNode, w: number, h: number): void {
+    const view = node.view;
+    const width = Math.max(40, Math.round(w));
+    const height = Math.max(30, Math.round(h));
+    const key = `${view.kind}|${view.data ?? ""}|${view.label ?? ""}|${width}|${height}|${this.#theme.name}`;
+    if (key === node.svgKey) return;
+    node.svgKey = key;
+    const svg =
+      view.kind === "chart"
+        ? (() => {
+            const spec = parseChart(view.data);
+            return spec ? chartSvg(spec, width, height, CHART_THEMES[this.#theme.name]) : sceneCardSvg("Chart: no data", width, height);
+          })()
+        : sceneCardSvg(view.label ?? "3D scene", width, height);
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      if (node.svgKey !== key || !(node.body instanceof Sprite) || node.body.destroyed) return;
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const texture = Texture.from(canvas);
+      const old = node.svgTexture;
+      node.svgTexture = texture;
+      node.body.texture = texture;
+      node.body.setSize(node.pose.w, node.pose.h);
+      old?.destroy(true);
+    };
+    image.onerror = () => URL.revokeObjectURL(url);
+    image.src = url;
   }
 
   /** Arrows follow the shapes they're attached to (including mid-animation). */

@@ -203,13 +203,14 @@ export function TopBar({ editor, onShare }: { editor: Editor | null; onShare: ()
   const following = useUiStore((s) => s.following);
   const peers = useUiStore((s) => s.peers);
   const followed = peers.find((p) => p.clientId === following);
+  const presentable = editor !== null;
   return (
     <>
-      <motion.div
-        initial={{ y: -24, opacity: 0 }}
+      <motion.header
+        initial={{ y: -12, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={spring}
-        className={`pointer-events-auto absolute left-4 top-4 flex items-center gap-1 p-1.5 ${panel}`}
+        className="pointer-events-auto absolute inset-x-0 top-0 z-20 flex h-14 items-center gap-2 border-b border-edge bg-paper/85 px-3 backdrop-blur-xl"
       >
         <a {...linkProps("/boards")} title="All boards" className="grid h-9 w-9 place-items-center rounded-xl hover:bg-hover">
           <Logo className="h-6 w-6" />
@@ -218,28 +219,35 @@ export function TopBar({ editor, onShare }: { editor: Editor | null; onShare: ()
         <Title editor={editor} />
         {viewMode && <span className="rounded-lg bg-accent/15 px-2 py-1 text-[11px] font-bold text-accent">View only</span>}
         <SyncButton editor={editor} />
-      </motion.div>
-      <motion.div
-        initial={{ y: -24, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ ...spring, delay: 0.05 }}
-        className={`pointer-events-auto absolute right-4 top-4 flex items-center gap-1 p-1.5 ${panel}`}
-      >
-        <Avatars editor={editor} />
-        <motion.button
-          type="button"
-          data-tour="share"
-          onClick={onShare}
-          disabled={!editor}
-          whileTap={{ scale: 0.96 }}
-          className="flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3.5 text-[13px] font-semibold text-white shadow-[0_6px_16px_rgba(47,99,255,0.35)] hover:brightness-110 disabled:opacity-40"
-        >
-          <Icon name="share" className="h-4 w-4" />
-          Share
-        </motion.button>
-        <ExportMenu editor={editor} />
-        <ThemeToggle compact />
-      </motion.div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Avatars editor={editor} />
+          <span className="mx-1 h-5 w-px bg-line" />
+          <motion.button
+            type="button"
+            onClick={() => editor?.startPresenting()}
+            disabled={!presentable}
+            whileTap={{ scale: 0.96 }}
+            title="Present: frames become slides"
+            className="flex h-9 items-center gap-1.5 rounded-xl border border-line px-3 text-[13px] font-semibold text-ink hover:bg-hover disabled:opacity-40"
+          >
+            <Icon name="eye" className="h-4 w-4" />
+            <span className="hidden md:inline">Present</span>
+          </motion.button>
+          <motion.button
+            type="button"
+            data-tour="share"
+            onClick={onShare}
+            disabled={!editor}
+            whileTap={{ scale: 0.96 }}
+            className="flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3.5 text-[13px] font-semibold text-white shadow-[0_6px_16px_rgba(47,99,255,0.35)] hover:brightness-110 disabled:opacity-40"
+          >
+            <Icon name="share" className="h-4 w-4" />
+            Share
+          </motion.button>
+          <ExportMenu editor={editor} />
+          <ThemeToggle compact />
+        </div>
+      </motion.header>
       <AnimatePresence>
         {followed && (
           <motion.div

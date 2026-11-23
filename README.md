@@ -35,7 +35,8 @@ links, and an AI that runs on your own machine.
 | **Flow** | **Quick-connect** + handles on hover, **radial right-click menu**, springy pop animations, first-visit **guided tour** |
 | **Offline & history** | Works with no connection (edits queue on the device and merge later), selective undo (only your own edits), **time travel** slider with restore |
 | **Share & export** | Edit and view-only links (server-signed when auth is on), **PNG / SVG / PDF** export of the board or the selection |
-| **AI (local)** | Create a board, **draw a flowchart or mind map with real connectors**, organize notes into columns, **summarize the board and list what's missing** |
+| **Layout** | Pro editor: header with Present/Share, left sidebar (**Pages**, **Layers** with search, **Templates**), right panel with **Design** (exact color, position, size, rotation, text, arrange) and **AI** |
+| **AI (local)** | **Detailed plans** (phases as frames; cards with detail, owner, due date, priority), **flowcharts and mind maps** with real connectors, **charts** (bar, line, area, pie, donut, funnel), **interactive 3D scenes**, **slide decks** that play in Present mode with animated reveals, summaries with what's missing; choose the local model in the panel |
 
 ## How it fits together
 

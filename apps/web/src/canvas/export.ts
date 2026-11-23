@@ -1,5 +1,6 @@
 import type { ShapeView } from "@canvas/doc";
 import { FRAME_TITLE_H, arrowEnds, boundsOf, center, pathPoints, visualBounds, type Lookup, type Rect } from "./geometry";
+import { CHART_THEMES, chartSvg, parseChart, sceneCardSvg } from "./charts";
 import { displayFill, hex, inkColor, labelColor, type CanvasTheme } from "./theme";
 
 /**
@@ -103,6 +104,15 @@ function shapeSvg(s: ShapeView, lookup: Lookup, theme: CanvasTheme, withText: bo
         text = `<rect x="${n(mid.x - w / 2)}" y="${n(mid.y - 12)}" width="${n(w)}" height="24" rx="10" fill="${hex(theme.paper)}" stroke="${hex(theme.line)}"/>${textBlock([label], mid.x, mid.y - 9, 13, 16, theme.ink, 600, "middle")}`;
       }
       return `<line x1="${n(a.x)}" y1="${n(a.y)}" x2="${n(tail.x)}" y2="${n(tail.y)}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/><polygon points="${n(b.x)},${n(b.y)} ${n(p1.x)},${n(p1.y)} ${n(p2.x)},${n(p2.y)}" fill="${color}"/>${text}`;
+    }
+    case "chart":
+    case "scene3d": {
+      const spec = s.kind === "chart" ? parseChart(s.data) : undefined;
+      const w = Math.max(40, Math.round(s.w));
+      const h = Math.max(30, Math.round(s.h));
+      const inner = spec ? chartSvg(spec, w, h, CHART_THEMES[theme.name]) : sceneCardSvg(s.label ?? "3D scene", w, h);
+      // Nest the chart's own SVG, positioned and sized like the shape.
+      return `<g${rot}>${inner.replace("<svg ", `<svg x="${n(s.x)}" y="${n(s.y)}" `)}</g>`;
     }
     case "comment": {
       const pin = `<circle cx="${n(s.x + 16)}" cy="${n(s.y + 16)}" r="15" fill="${fill}" stroke="#fff" stroke-width="2.5"/>`;

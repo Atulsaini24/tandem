@@ -557,3 +557,32 @@ heuristic), sweeping down and up and keeping the ordering with the fewest crossi
 never gets worse. AI results (boards, diagrams) now go to empty space to the right of
 everything on the board, with the camera flying there first, instead of on top of what's
 in view; the AI panel's result card can jump back to the result or undo the run.
+
+## D064 — The board is laid out like a pro editor
+Floating panels over a full-screen canvas hid most of what the app can do. The board is
+now a header (title, sync, people, Present, Share, export), a left sidebar (Pages = every
+frame, Layers = every shape with search, Templates) and a right panel with two tabs:
+Design (exact color, X/Y/W/H, rotation, text, chart type, arrange, actions) and AI. The
+canvas fills the space between and resizes with the panels (a ResizeObserver tells Pixi);
+overlays that track the canvas (text editing, cursor chat, 3D views) live inside the
+canvas area so their coordinates stay right. Present mode hides all of it.
+
+## D065 — Charts and 3D scenes are JSON specs, validated twice, drawn from one source
+Two new shape kinds store a spec in a `data` property: `chart` (bar, line, area, pie,
+donut, funnel) and `scene3d` (primitives with color, position, size and motion). The AI's
+schema constrains the output, and the app validates and clamps it again before drawing,
+because the spec is shared document data any client could write. Charts are drawn as SVG
+and rasterized into a texture for the canvas, and export embeds the same SVG, so the two
+can't drift apart. 3D scenes draw a card on the canvas with a live Three.js view floating
+over it (at most four at once, since each is a WebGL context); double-click to orbit.
+Model quirks fixed in the validator rather than in prompts: a glowing object never orbits
+(models made the sun circle the planets), and a long unit moves into the note so every
+number stays short.
+
+## D066 — Model choice is the user's, and the trade-off is measured
+On this laptop (16 GB RAM, 4 GB GPU) gemma4:26b can't load at all, qwen3:8b gives better
+answers at about 2 tokens/s, and gemma3:4b runs at about 12 tokens/s. The AI panel lists
+installed models (best first, too-large ones flagged) and remembers the choice. Reasoning
+models are asked not to think out loud (`think: false`): with a fixed output schema,
+the hidden reasoning costs minutes and adds nothing. The context window is 4096 tokens to
+keep memory use within a laptop's budget.

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { NodeId } from "@canvas/doc";
 import type { SyncStatus } from "@canvas/sync";
+import { saveModel, savedModel } from "../canvas/ai-models";
 import { applyTheme, loadPreference, resolveTheme, savePreference, type Theme, type ThemePreference } from "../canvas/theme";
 
 export type Tool = "select" | "hand" | "rect" | "ellipse" | "diamond" | "text" | "note" | "arrow" | "pen" | "frame" | "comment";
@@ -20,7 +21,7 @@ export interface TeamUiState {
 
 export interface AiUiState {
   readonly status: "idle" | "thinking" | "writing" | "done" | "error" | "cancelled";
-  readonly mode?: "generate" | "organize" | "diagram" | "insight";
+  readonly mode?: "generate" | "organize" | "diagram" | "insight" | "chart" | "scene" | "deck";
   /** Where the last finished result is on the board (for "Show result"). */
   readonly result?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /** Insight mode: the summary, shown in the panel too. */
@@ -115,6 +116,9 @@ interface UiState {
   /** The simulated team (bots) is running. */
   readonly crowd: boolean;
   readonly team: TeamUiState | undefined;
+  /** The 3D scene currently taking mouse input (drag to orbit). */
+  readonly orbiting: string | undefined;
+  setOrbiting(id: string | undefined): void;
   setTeam(team: TeamUiState | undefined): void;
   readonly ritualsOpen: boolean;
   setVoting(voting: boolean): void;
@@ -151,6 +155,9 @@ interface UiState {
   readonly editing: NodeId | undefined;
   readonly ai: AiUiState;
   readonly aiOpen: boolean;
+  /** The local model the AI runs on (see canvas/ai-models.ts). */
+  readonly aiModel: string;
+  setAiModel(model: string): void;
   readonly themePreference: ThemePreference;
   readonly theme: Theme;
   setTheme(preference: ThemePreference): void;
@@ -192,6 +199,8 @@ export const useUiStore = create<UiState>()((set) => ({
   radial: undefined,
   crowd: false,
   team: undefined,
+  orbiting: undefined,
+  setOrbiting: (orbiting) => set({ orbiting }),
   setTeam: (team) => set({ team }),
   ritualsOpen: false,
   setVoting: (voting) => set({ voting }),
@@ -223,6 +232,11 @@ export const useUiStore = create<UiState>()((set) => ({
   editing: undefined,
   ai: { status: "idle", items: 0 },
   aiOpen: false,
+  aiModel: savedModel() ?? "qwen3:4b",
+  setAiModel: (aiModel) => {
+    saveModel(aiModel);
+    set({ aiModel });
+  },
   themePreference: loadPreference(),
   theme: resolveTheme(loadPreference()),
   setTheme: (themePreference) => {

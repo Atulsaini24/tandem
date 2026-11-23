@@ -8,6 +8,7 @@ export {
   MAX_TITLE_CHARS,
   META_ID,
   VOTE_PREFIX,
+  MAX_DATA_CHARS,
   MAX_POINTS_CHARS,
   formatPoints,
   parsePoints,

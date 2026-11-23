@@ -2,6 +2,7 @@ import { runAssistant } from "@canvas/ai";
 import type { NodeId } from "@canvas/doc";
 import type { Presence } from "@canvas/sync";
 import { useUiStore, type TeamPhase } from "../state/ui-store";
+import { chatOptions } from "./ai-models";
 import type { Editor } from "./editor";
 import { INK, NOTE_COLORS } from "./templates";
 import type { Point } from "./viewport";
@@ -154,10 +155,8 @@ export class CrowdSim {
     let themes: Array<{ title: string; items: string[] }> = [];
     const timeout = setTimeout(() => abort.abort(), 40_000);
     try {
-      const url = (import.meta.env.VITE_OLLAMA_URL as string | undefined) ?? "http://localhost:11434";
-      const model = (import.meta.env.VITE_OLLAMA_MODEL as string | undefined) ?? "gemma3:4b";
       const prompt = `Team brainstorm about: ${topic}. Exactly 3 columns (themes), each with exactly 3 short, concrete ideas (under 40 characters).`;
-      for await (const event of runAssistant({ mode: "generate", prompt }, { url, model, signal: abort.signal })) {
+      for await (const event of runAssistant({ mode: "generate", prompt }, { ...chatOptions(useUiStore.getState().aiModel), signal: abort.signal })) {
         if (event.type === "column") themes[event.column] = { title: event.title, items: themes[event.column]?.items ?? [] };
         if (event.type === "item") {
           const t = themes[event.column] ?? { title: `Theme ${event.column + 1}`, items: [] };

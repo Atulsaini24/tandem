@@ -15,7 +15,8 @@ const H = 136;
  */
 export function Minimap({ editor }: { editor: Editor | null }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const [open, setOpen] = useState(true);
+  // Collapsed by default when the canvas is narrow (panels open): it would cover the work.
+  const [open, setOpen] = useState(() => window.innerWidth >= 1500);
   const zoom = useUiStore((s) => s.stats.zoom);
   const frame = useRef<{ world: Rect; scale: number; ox: number; oy: number } | undefined>(undefined);
 

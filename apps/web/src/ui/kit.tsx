@@ -57,6 +57,11 @@ export const ICONS = {
   close: "M6 6l12 12M18 6L6 18",
   star: "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z",
   map: "M9 4l-6 2v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14",
+  chart: "M4 20V10M10 20V4M16 20v-7M21 20H3",
+  cube: "M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5",
+  slides: "M3 5h18v12H3zM8 21h8M12 17v4",
+  panel: "M4 4h16v16H4zM9 4v16",
+  inspect: "M4 4h16v16H4zM15 4v16",
 } as const;
 
 export type IconName = keyof typeof ICONS;

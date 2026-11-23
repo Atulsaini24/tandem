@@ -43,3 +43,16 @@ export {
   type InsightEvent,
   type NodeShape,
 } from "./diagram.js";
+export {
+  CHART_SCHEMA,
+  DECK_SCHEMA,
+  SCENE_SCHEMA,
+  buildChartMessages,
+  buildDeckMessages,
+  buildSceneMessages,
+  cleanSlide,
+  runDeck,
+  runJson,
+  type DeckEvent,
+  type DeckSlide,
+} from "./creative.js";

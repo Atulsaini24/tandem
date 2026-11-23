@@ -29,8 +29,8 @@ import {
  * It also keeps this replica's undo/redo history (see "Selective undo" below).
  */
 
-export type ShapeKind = "rect" | "ellipse" | "diamond" | "text" | "frame" | "arrow" | "path" | "comment";
-export const SHAPE_KINDS: readonly ShapeKind[] = ["rect", "ellipse", "diamond", "text", "frame", "arrow", "path", "comment"];
+export type ShapeKind = "rect" | "ellipse" | "diamond" | "text" | "frame" | "arrow" | "path" | "comment" | "chart" | "scene3d";
+export const SHAPE_KINDS: readonly ShapeKind[] = ["rect", "ellipse", "diamond", "text", "frame", "arrow", "path", "comment", "chart", "scene3d"];
 
 export interface ShapeProps {
   readonly kind: ShapeKind;
@@ -54,6 +54,8 @@ export interface ShapeProps {
   readonly to?: string;
   /** Comments: who wrote it. */
   readonly author?: string;
+  /** Charts and 3D scenes: their spec as JSON (validated by the app when drawn). */
+  readonly data?: string;
 }
 
 export interface ShapeView extends ShapeProps {
@@ -100,13 +102,14 @@ export interface UndoResult {
   readonly skipped: number;
 }
 
-const PROP_KEYS = ["kind", "x", "y", "w", "h", "fill", "label", "rotation", "points", "from", "to", "author"] as const satisfies ReadonlyArray<keyof ShapeProps>;
+const PROP_KEYS = ["kind", "x", "y", "w", "h", "fill", "label", "rotation", "points", "from", "to", "author", "data"] as const satisfies ReadonlyArray<keyof ShapeProps>;
 /** Optional props, and the value that means "absent" (written to clear them on restore). */
-const OPTIONAL_KEYS = { label: "", rotation: 0, points: "", from: "", to: "", author: "" } as const;
+const OPTIONAL_KEYS = { label: "", rotation: 0, points: "", from: "", to: "", author: "", data: "" } as const;
 type OptionalKey = keyof typeof OPTIONAL_KEYS;
 const isOptional = (key: string): key is OptionalKey => key in OPTIONAL_KEYS;
 export const MAX_LABEL_CHARS = 500;
 export const MAX_POINTS_CHARS = 40_000;
+export const MAX_DATA_CHARS = 24_000;
 const MAX_REF_CHARS = 80;
 /** Id of the hidden property map holding document metadata (title). Never a shape. */
 export const META_ID = "__meta__";
@@ -147,6 +150,9 @@ export function validatePatch(patch: Partial<ShapeProps>): void {
   if (patch.rotation !== undefined && !Number.isFinite(patch.rotation)) throw new RangeError("rotation must be finite");
   if (patch.points !== undefined && (typeof patch.points !== "string" || patch.points.length > MAX_POINTS_CHARS)) {
     throw new RangeError(`points must be a string of at most ${MAX_POINTS_CHARS} characters`);
+  }
+  if (patch.data !== undefined && (typeof patch.data !== "string" || patch.data.length > MAX_DATA_CHARS)) {
+    throw new RangeError(`data must be a string of at most ${MAX_DATA_CHARS} characters`);
   }
   for (const key of ["from", "to", "author"] as const) {
     const value = patch[key];

@@ -3,7 +3,14 @@ import {
   COLORS,
   OllamaError,
   headerRect,
+  CHART_SCHEMA,
+  SCENE_SCHEMA,
+  buildChartMessages,
+  buildSceneMessages,
   layoutDiagram,
+  runDeck,
+  runJson,
+  type DeckSlide,
   runDiagram,
   runInsight,
   stagingRect,
@@ -19,12 +26,15 @@ import {
   type Rect,
 } from "@canvas/ai";
 import { useUiStore } from "../state/ui-store";
+import { chatOptions } from "./ai-models";
+import { parseChart } from "./charts";
+import { parseScene } from "./scenes";
 import { boundsOf, visualBounds } from "./geometry";
 import { INK, NOTE_COLORS } from "./templates";
 import type { Editor } from "./editor";
 
-const OLLAMA_URL = (import.meta.env.VITE_OLLAMA_URL as string | undefined) ?? "http://localhost:11434";
-const OLLAMA_MODEL = (import.meta.env.VITE_OLLAMA_MODEL as string | undefined) ?? "gemma3:4b";
+/** The model the user picked, with the right options for it. */
+const llm = (signal: AbortSignal) => ({ ...chatOptions(useUiStore.getState().aiModel), signal });
 const TITLE_FILL = 0x111318;
 const NOTE_FILL = COLORS.yellow;
 
@@ -86,7 +96,7 @@ export class AiRunner {
     let items = 0;
     useUiStore.getState().setAi({ status: "thinking", mode: "diagram", items: 0, startedAt: Date.now(), message: "", tokensPerSecond: 0 });
     try {
-      for await (const event of runDiagram(kind, prompt, { url: OLLAMA_URL, model: OLLAMA_MODEL, signal: abort.signal })) {
+      for await (const event of runDiagram(kind, prompt, llm(abort.signal))) {
         if (event.type === "title") {
           titleId = editor.aiCreate({ kind: "text", x: origin.x, y: origin.y - 70, w: 640, h: 40, fill: INK, label: event.title }, group);
           const current = useUiStore.getState().title;
@@ -169,7 +179,7 @@ export class AiRunner {
     let items = 0;
     useUiStore.getState().setAi({ status: "thinking", mode: "insight", items: 0, startedAt: Date.now(), message: "", summary: "", tokensPerSecond: 0 });
     try {
-      for await (const event of runInsight(prompt, texts, { url: OLLAMA_URL, model: OLLAMA_MODEL, signal: abort.signal })) {
+      for await (const event of runInsight(prompt, texts, llm(abort.signal))) {
         if (event.type === "summary") {
           frameId = editor.aiCreate({ kind: "frame", x, y, w: W, h: height, fill: 0x7b55e7, label: "✦ AI summary" }, group);
           editor.aiCreate({ kind: "rect", x: x + 24, y: y + 24, w: W - 48, h: 120, fill: NOTE_COLORS.purple, label: event.text }, group);
@@ -211,6 +221,145 @@ export class AiRunner {
     }
   }
 
+  /** Make a chart (bar, line, area, pie, donut, funnel) with a takeaway note beside it. */
+  async chart(prompt: string): Promise<void> {
+    if (this.#abort) return;
+    const abort = new AbortController();
+    this.#abort = abort;
+    const editor = this.#editor;
+    const ui = useUiStore.getState();
+    ui.setAi({ status: "thinking", mode: "chart", items: 0, startedAt: Date.now(), message: "", tokensPerSecond: 0 });
+    try {
+      const { value, tokensPerSecond } = await runJson(buildChartMessages(prompt), CHART_SCHEMA, llm(abort.signal), () => useUiStore.getState().setAi({ status: "writing" }));
+      const data = JSON.stringify(value);
+      const spec = parseChart(data);
+      if (!spec) throw new Error("The model didn't return usable chart data. Try rephrasing.");
+      const insight = typeof (value as { insight?: unknown }).insight === "string" ? (value as { insight: string }).insight.slice(0, 200) : "";
+      const w = spec.type === "pie" || spec.type === "donut" ? 620 : 720;
+      const h = 430;
+      const at = this.#freeSpot(w + 300, h);
+      const group = editor.beginGroup();
+      editor.aiCreate({ kind: "chart", x: at.x, y: at.y, w, h, fill: 0x2f63ff, data, label: spec.title }, group);
+      if (insight) editor.aiCreate({ kind: "rect", x: at.x + w + 40, y: at.y + 40, w: 260, h: 150, fill: NOTE_COLORS.yellow, label: `💡 ${insight}` }, group);
+      useUiStore.getState().setAi({ status: "done", items: 1, finishedAt: Date.now(), message: `${spec.type} chart · ${spec.labels.length} points${spec.series.length > 1 ? ` · ${spec.series.length} series` : ""}`, ...(tokensPerSecond === undefined ? {} : { tokensPerSecond }) });
+      this.#show({ x: at.x, y: at.y - 20, w: w + (insight ? 300 : 0), h: h + 40 });
+    } catch (error) {
+      this.#fail(error, abort);
+    } finally {
+      this.#abort = undefined;
+    }
+  }
+
+  /** Build an interactive 3D scene in a 3D card on the board. */
+  async scene(prompt: string): Promise<void> {
+    if (this.#abort) return;
+    const abort = new AbortController();
+    this.#abort = abort;
+    const editor = this.#editor;
+    useUiStore.getState().setAi({ status: "thinking", mode: "scene", items: 0, startedAt: Date.now(), message: "", tokensPerSecond: 0 });
+    try {
+      const { value, tokensPerSecond } = await runJson(buildSceneMessages(prompt), SCENE_SCHEMA, llm(abort.signal), () => useUiStore.getState().setAi({ status: "writing" }));
+      const data = JSON.stringify(value);
+      const spec = parseScene(data);
+      if (!spec) throw new Error("The model didn't return a usable 3D scene. Try rephrasing.");
+      const w = 760;
+      const h = 540;
+      const at = this.#freeSpot(w, h);
+      editor.aiCreate({ kind: "scene3d", x: at.x, y: at.y, w, h, fill: 0x111318, data, label: spec.title || prompt.slice(0, 60) }, editor.beginGroup());
+      useUiStore.getState().setAi({ status: "done", items: spec.objects.length, finishedAt: Date.now(), message: "3D scene · double-click it to orbit", ...(tokensPerSecond === undefined ? {} : { tokensPerSecond }) });
+      this.#show({ x: at.x, y: at.y - 20, w, h: h + 40 });
+    } catch (error) {
+      this.#fail(error, abort);
+    } finally {
+      this.#abort = undefined;
+    }
+  }
+
+  /**
+   * A slide deck: each slide is a frame (960×540) built the moment the model finishes it,
+   * then Present mode plays them with animated reveals.
+   */
+  async deck(prompt: string): Promise<void> {
+    if (this.#abort) return;
+    const abort = new AbortController();
+    this.#abort = abort;
+    const editor = this.#editor;
+    const W = 960;
+    const H = 540;
+    const GAP = 120;
+    const notes = editor.scene.ordered().flatMap((s) => (s.label?.trim() && s.kind !== "frame" && editor.selected().some((x) => x.id === s.id) ? [s.label] : []));
+    const origin = this.#freeSpot(W * 2 + GAP, H);
+    const group = editor.beginGroup();
+    const frames: NodeId[] = [];
+    useUiStore.getState().setAi({ status: "thinking", mode: "deck", items: 0, startedAt: Date.now(), message: "", tokensPerSecond: 0 });
+    try {
+      for await (const event of runDeck(prompt, notes, llm(abort.signal))) {
+        if (event.type === "slide") {
+          const x = origin.x + event.slide.index * (W + GAP);
+          const y = origin.y;
+          frames.push(this.#slide(event.slide, x, y, W, H, group));
+          editor.renderer.fitTo({ x: x - 40, y: y - 80, w: W + 80, h: H + 120 }, 40, 0, 1, 700, true);
+          useUiStore.getState().setAi({ status: "writing", items: frames.length });
+        } else if (event.type === "done") {
+          useUiStore.getState().setAi({ status: "done", items: event.slides, finishedAt: Date.now(), message: "Playing it now in Present mode — arrows to move, Esc to stop", ...(event.tokensPerSecond === undefined ? {} : { tokensPerSecond: event.tokensPerSecond }) });
+          if (frames.length > 0) {
+            useUiStore.getState().setAi({ status: "done", result: { x: origin.x, y: origin.y - 40, w: frames.length * (W + GAP), h: H + 80 } });
+            setTimeout(() => editor.startPresenting(frames), 600);
+          }
+        }
+      }
+    } catch (error) {
+      this.#fail(error, abort);
+    } finally {
+      this.#abort = undefined;
+    }
+  }
+
+  /** Lay out one slide inside its frame, by layout. Returns the frame id. */
+  #slide(slide: DeckSlide, x: number, y: number, W: number, H: number, group: number): NodeId {
+    const editor = this.#editor;
+    const accent = [0x2f63ff, 0x7b55e7, 0x1e8f5a, 0xef6b3a, 0xdd4f78, 0x137d77][slide.index % 6] ?? 0x2f63ff;
+    const frame = editor.aiCreate({ kind: "frame", x, y, w: W, h: H, fill: accent, label: `${slide.index + 1}. ${slide.title}`.slice(0, 120) }, group);
+    editor.engine.send({ type: "back", seq: editor.engine.nextSeq(), ids: [frame], group });
+    const pad = 56;
+    if (slide.layout === "title") {
+      // Room for a two-line title (the font follows the box height: 72 → ~43px).
+      editor.aiCreate({ kind: "text", x: x + pad, y: y + 120, w: W - pad * 2, h: 72, fill: INK, label: slide.title }, group);
+      editor.aiCreate({ kind: "rect", x: x + pad, y: y + 300, w: 140, h: 10, fill: accent }, group);
+      if (slide.subtitle) editor.aiCreate({ kind: "text", x: x + pad, y: y + 336, w: W - pad * 2, h: 36, fill: INK, label: slide.subtitle }, group);
+      return frame;
+    }
+    editor.aiCreate({ kind: "text", x: x + pad, y: y + 44, w: W - pad * 2, h: 64, fill: INK, label: slide.title }, group);
+    if (slide.layout === "quote") {
+      editor.aiCreate({ kind: "rect", x: x + pad, y: y + 160, w: W - pad * 2, h: 260, fill: NOTE_COLORS.purple, label: `“${slide.subtitle || slide.bullets[0] || slide.title}”` }, group);
+    } else if (slide.layout === "stats" && slide.stats.length > 0) {
+      const n = slide.stats.length;
+      const cw = (W - pad * 2 - (n - 1) * 28) / n;
+      slide.stats.forEach((stat, i) => {
+        // Big-number layout: a huge value, a colored bar, and the label under it.
+        const sx = x + pad + i * (cw + 28);
+        const tint = [0x2f63ff, 0x1e8f5a, 0xef6b3a, 0x7b55e7][i % 4] ?? accent;
+        // The font follows the box height (≈0.6×); keep the value on one line in its column.
+        const valueH = Math.max(48, Math.min(110, cw / (0.4 * Math.max(3, Array.from(stat.value).length))));
+        editor.aiCreate({ kind: "text", x: sx, y: y + 280 - valueH, w: cw, h: valueH, fill: INK, label: stat.value }, group);
+        editor.aiCreate({ kind: "rect", x: sx, y: y + 300, w: Math.min(120, cw), h: 8, fill: tint }, group);
+        editor.aiCreate({ kind: "text", x: sx, y: y + 324, w: cw, h: 32, fill: INK, label: stat.label }, group);
+      });
+      if (slide.subtitle) editor.aiCreate({ kind: "text", x: x + pad, y: y + 430, w: W - pad * 2, h: 36, fill: INK, label: slide.subtitle }, group);
+    } else if (slide.layout === "chart" && slide.chart) {
+      const c = slide.chart;
+      const data = JSON.stringify({ type: c.type, title: "", unit: c.unit, labels: c.labels, series: [{ name: slide.title, values: c.values }], note: "" });
+      editor.aiCreate({ kind: "chart", x: x + pad, y: y + 130, w: slide.subtitle ? 560 : W - pad * 2, h: 360, fill: accent, data }, group);
+      if (slide.subtitle) editor.aiCreate({ kind: "rect", x: x + pad + 590, y: y + 170, w: W - pad * 2 - 590, h: 200, fill: NOTE_COLORS.yellow, label: `💡 ${slide.subtitle}` }, group);
+    } else {
+      const bullets = slide.bullets.length > 0 ? slide.bullets : slide.subtitle ? [slide.subtitle] : [];
+      bullets.forEach((b, i) => {
+        editor.aiCreate({ kind: "rect", x: x + pad, y: y + 140 + i * 72, w: W - pad * 2, h: 58, fill: i % 2 ? NOTE_COLORS.blue : NOTE_COLORS.green, label: `${i + 1}.  ${b}` }, group);
+      });
+    }
+    return frame;
+  }
+
   /** Selected shapes that have text, in reading order. */
   organizable() {
     const scene = this.#editor.scene;
@@ -239,7 +388,7 @@ export class AiRunner {
     };
 
     try {
-      for await (const event of runAssistant(request, { url: OLLAMA_URL, model: OLLAMA_MODEL, signal: abort.signal })) {
+      for await (const event of runAssistant(request, llm(abort.signal))) {
         this.#apply(event, origin, noteIds, group, place, placed, columnFill);
         if (event.type === "item") {
           items += 1;
@@ -280,16 +429,35 @@ export class AiRunner {
     columnFill: Map<number, number>,
   ): void {
     switch (event.type) {
-      case "title":
+      case "title": {
         place(titleRect(origin), { kind: "rect", fill: TITLE_FILL, label: event.title });
+        const current = useUiStore.getState().title;
+        if (!current || current === "Untitled board") this.#editor.setTitle(event.title);
         return;
+      }
       case "column": {
         const fill = COLORS[event.color];
         columnFill.set(event.column, fill);
-        place(headerRect(origin, event.column), { kind: "rect", fill, label: event.title });
+        if (noteIds.length > 0) {
+          place(headerRect(origin, event.column), { kind: "rect", fill, label: event.title });
+          return;
+        }
+        // A detailed plan: every column is a frame (a page you can present), headed by its title.
+        const r = richColumn(origin, event.column);
+        const frame = this.#editor.aiCreate({ kind: "frame", x: r.x, y: r.y, w: r.w, h: r.h, fill, label: event.title }, group);
+        this.#editor.engine.send({ type: "back", seq: this.#editor.engine.nextSeq(), ids: [frame], group });
+        placed.push(r);
         return;
       }
       case "item": {
+        if (noteIds.length === 0) {
+          const rect = richItem(origin, event.column, event.index);
+          const meta = [event.owner ? `👤 ${event.owner}` : "", event.due ? `📅 ${event.due}` : "", event.priority ? `${PRIORITY[event.priority]} ${event.priority}` : ""].filter(Boolean).join("  ·  ");
+          const label = [event.text, event.detail ?? "", meta].filter(Boolean).join("\n\n");
+          const pastel = PASTEL[event.column % PASTEL.length] ?? NOTE_FILL;
+          place(rect, { kind: "rect", fill: pastel, label: label.slice(0, 480) });
+          return;
+        }
         const rect = itemRect(origin, event.column, event.index);
         const existing = event.source === undefined ? undefined : noteIds[event.source];
         if (existing) {
@@ -310,7 +478,7 @@ export class AiRunner {
   #freeSpot(w = 900, h = 620): Point {
     const editor = this.#editor;
     const spot = editor.freeSpot(w, h);
-    if (editor.scene.size > 0) editor.renderer.fitTo({ x: spot.x - 40, y: spot.y - 100, w: w + 80, h: h + 140 }, 40, useUiStore.getState().aiOpen ? 372 : 0, 1, 800, true);
+    if (editor.scene.size > 0) editor.renderer.fitTo({ x: spot.x - 40, y: spot.y - 100, w: w + 80, h: h + 140 }, 40, 0, 1, 800, true);
     return spot;
   }
 
@@ -360,4 +528,23 @@ function mindmapColors(nodes: readonly DiagramNode[], edges: ReadonlyArray<{ fro
     }
   });
   return fills;
+}
+
+const PASTEL = [0xa9cdff, 0xffd666, 0xa8e6b4, 0xffadc8, 0xcdb8ff, 0xffc49b] as const;
+const PRIORITY = { high: "🔴", medium: "🟠", low: "🟢" } as const;
+const RICH = { width: 300, cardH: 168, gap: 18, colGap: 48, head: 70, pad: 22 } as const;
+
+/** A detailed plan's column frame (tall enough for six cards). */
+function richColumn(origin: Point, column: number): Rect {
+  return {
+    x: origin.x + column * (RICH.width + RICH.pad * 2 + RICH.colGap),
+    y: origin.y + 90,
+    w: RICH.width + RICH.pad * 2,
+    h: RICH.head + 6 * (RICH.cardH + RICH.gap) + RICH.pad,
+  };
+}
+
+function richItem(origin: Point, column: number, index: number): Rect {
+  const c = richColumn(origin, column);
+  return { x: c.x + RICH.pad, y: c.y + RICH.head - 30 + index * (RICH.cardH + RICH.gap), w: RICH.width, h: RICH.cardH };
 }

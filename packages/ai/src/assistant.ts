@@ -17,6 +17,11 @@ export type AiEvent =
       readonly text: string;
       /** Index of an existing note this item places (organize mode). */
       readonly source?: number;
+      /** Rich plans: one-line detail, owner role, due date, priority. */
+      readonly detail?: string;
+      readonly owner?: string;
+      readonly due?: string;
+      readonly priority?: "high" | "medium" | "low";
     }
   | {
       readonly type: "done";
@@ -125,15 +130,28 @@ export class BoardPlanReader {
   /** Generate mode: a new card. */
   #item(rawColumn: unknown, value: unknown, events: AiEvent[]): void {
     const column = this.#column(rawColumn);
-    const item = typeof value === "object" && value !== null ? (value as { text?: unknown }) : {};
+    const item = typeof value === "object" && value !== null ? (value as { text?: unknown; detail?: unknown; owner?: unknown; due?: unknown; priority?: unknown }) : {};
     const text = cleanText(item.text, LIMITS.itemChars);
+    const detail = cleanText(item.detail, 140);
+    const owner = cleanText(item.owner, 30);
+    const due = cleanText(item.due, 24);
+    const priority = item.priority === "high" || item.priority === "medium" || item.priority === "low" ? item.priority : undefined;
     if (!column || !text || column.items >= LIMITS.itemsPerColumn) {
       this.rejected += 1;
       return;
     }
     this.#announce(column, events);
     this.items += 1;
-    events.push({ type: "item", column: column.index, index: column.items++, text });
+    events.push({
+      type: "item",
+      column: column.index,
+      index: column.items++,
+      text,
+      ...(detail ? { detail } : {}),
+      ...(owner ? { owner } : {}),
+      ...(due ? { due } : {}),
+      ...(priority ? { priority } : {}),
+    });
   }
 
   /** Organize mode: place an existing note. Each note at most once; bogus numbers dropped. */

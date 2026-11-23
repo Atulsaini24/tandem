@@ -28,6 +28,12 @@ export interface ChatOptions {
   readonly messages: readonly ChatMessage[];
   readonly format?: object;
   readonly temperature?: number;
+  /**
+   * Reasoning models (qwen3, deepseek-r1…) think out loud before answering by default.
+   * For schema-constrained output that's slow and adds nothing, so callers pass false.
+   * Left out for models that don't support the flag.
+   */
+  readonly think?: boolean;
   readonly signal?: AbortSignal;
   readonly fetch?: typeof fetch;
 }
@@ -52,7 +58,8 @@ export async function* streamChat(options: ChatOptions): AsyncGenerator<ChatChun
         messages: options.messages,
         stream: true,
         ...(options.format ? { format: options.format } : {}),
-        options: { temperature: options.temperature ?? 0.3 },
+        ...(options.think === undefined ? {} : { think: options.think }),
+        options: { temperature: options.temperature ?? 0.3, num_ctx: 4096 },
       }),
       ...(options.signal ? { signal: options.signal } : {}),
     });

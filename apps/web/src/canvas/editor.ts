@@ -119,6 +119,7 @@ export class Editor {
 
   #clipboard: { shapes: ShapeView[]; pastes: number } | undefined;
   #crowd: CrowdSim | undefined;
+  #revealTimer: ReturnType<typeof setTimeout> | undefined;
   #registryTimer: ReturnType<typeof setTimeout> | undefined;
   #restored = false;
 
@@ -343,6 +344,15 @@ export class Editor {
   startEditing(id: NodeId): void {
     const shape = this.scene.get(id);
     if (this.locked || !shape || shape.kind === "path") return;
+    if (shape.kind === "scene3d") {
+      useUiStore.getState().setOrbiting(id);
+      return;
+    }
+    if (shape.kind === "chart") {
+      this.select([id]);
+      useUiStore.getState().setAiOpen(false); // the Design tab has the chart controls
+      return;
+    }
     this.select([id]);
     useUiStore.getState().setEditing(id);
   }
@@ -633,8 +643,7 @@ export class Editor {
   // --- view ----------------------------------------------------------------------
 
   fitTo(rect: Rect): void {
-    // The AI panel (340px + margins) covers the right edge while open.
-    this.renderer.fitTo(rect, 80, useUiStore.getState().aiOpen ? 372 : 0);
+    this.renderer.fitTo(rect, 80, 0);
   }
 
   zoomToFit(maxZoom = 2): void {
@@ -761,13 +770,15 @@ export class Editor {
       .map((s) => s.id);
   }
 
-  startPresenting(): void {
-    const slides = this.slides();
+  /** Present the board's frames (or just `only`, e.g. a deck the AI just made). */
+  startPresenting(only?: readonly NodeId[]): void {
+    const slides = only ? only.filter((id) => this.scene.get(id)) : this.slides();
     this.select([]);
     useUiStore.getState().setEditing(undefined);
     useUiStore.getState().setPresenting({ slides, index: 0 });
     this.setSpotlight(true);
-    this.#showSlide(0, slides);
+    // Presenting hides the panels, which resizes the canvas: frame the slide after that.
+    setTimeout(() => this.#showSlide(0, slides), 360);
   }
 
   goToSlide(index: number): void {
@@ -790,6 +801,16 @@ export class Editor {
     const frame = id ? this.scene.get(id) : undefined;
     const target = frame ? visualBounds(frame, this.lookup) : boundsOf(this.scene.ordered().map((s) => visualBounds(s, this.lookup)));
     if (target) this.renderer.fitTo(target, 60, 0, 4, 1100, true);
+    if (!frame) return;
+    // Animated reveal: once the camera lands, the slide's contents pop in, top to bottom.
+    const inside = this.scene
+      .ordered()
+      .filter((s) => s.id !== frame.id && s.kind !== "frame" && containsRect(frame, visualBounds(s, this.lookup)))
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    clearTimeout(this.#revealTimer);
+    inside.forEach((s, i) => {
+      this.#revealTimer = setTimeout(() => this.renderer.pulse(s.id), 850 + i * 140);
+    });
   }
 
   // --- quick-connect -------------------------------------------------------------------
@@ -840,6 +861,12 @@ export class Editor {
       return { x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2) };
     }
     return { x: Math.round(bounds.x + bounds.w + 200), y: Math.round(bounds.y) };
+  }
+
+  /** The center of an empty w×h area beside the board (for templates and AI results). */
+  freeSpotCenter(w: number, h: number): Point {
+    const spot = this.freeSpot(w, h);
+    return this.scene.size === 0 ? this.viewCenter() : { x: spot.x + w / 2, y: spot.y + h / 2 };
   }
 
   /** A shape created by a bot teammate (pops in; its own undo step unless grouped). */
