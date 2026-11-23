@@ -200,6 +200,27 @@ export function AiPanel({ editor }: { editor: Editor | null }) {
                       Done: <b>{ai.items}</b> {ai.mode === "insight" ? "insights" : ai.mode === "diagram" ? "steps" : "cards"} in {elapsed.toFixed(0)}s
                       {ai.tokensPerSecond ? ` · ${ai.tokensPerSecond} tok/s` : ""}.
                       {ai.message ? <div className="mt-1 text-muted">{ai.message}</div> : null}
+                      <div className="mt-2.5 flex gap-2">
+                        {ai.result && (
+                          <button
+                            type="button"
+                            onClick={() => ai.result && editor?.fitTo(ai.result)}
+                            className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-ink text-[12px] font-bold text-paper"
+                          >
+                            <Icon name="fit" className="h-3.5 w-3.5" /> Show result
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            editor?.undo();
+                            useUiStore.getState().setAi({ status: "idle", items: 0 });
+                          }}
+                          className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg border border-line text-[12px] font-bold text-ink hover:border-bad hover:text-bad"
+                        >
+                          <Icon name="undo" className="h-3.5 w-3.5" /> Undo this run
+                        </button>
+                      </div>
                     </>
                   )}
                   {(ai.status === "error" || ai.status === "cancelled") && ai.message}

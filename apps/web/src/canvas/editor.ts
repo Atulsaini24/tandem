@@ -828,9 +828,23 @@ export class Editor {
     return this.#crowd;
   }
 
-  /** A shape created by a bot teammate (pops in; its own undo step). */
-  botCreate(props: ShapeProps): NodeId | undefined {
-    const [id] = this.#create([{ props }], this.beginGroup());
+  /**
+   * Top-left of an empty area of size w×h for new content: to the right of everything
+   * on the board (or the middle of the view on an empty board), so it never lands on top
+   * of existing work.
+   */
+  freeSpot(w: number, h: number): Point {
+    const bounds = boundsOf(this.scene.ordered().map((s) => visualBounds(s, this.lookup)));
+    if (!bounds) {
+      const c = this.viewCenter();
+      return { x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2) };
+    }
+    return { x: Math.round(bounds.x + bounds.w + 200), y: Math.round(bounds.y) };
+  }
+
+  /** A shape created by a bot teammate (pops in; its own undo step unless grouped). */
+  botCreate(props: ShapeProps, group?: number): NodeId | undefined {
+    const [id] = this.#create([{ props }], group ?? this.beginGroup());
     if (id) this.renderer.pulse(id);
     return id;
   }

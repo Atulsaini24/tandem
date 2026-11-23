@@ -132,7 +132,9 @@ export function RitualsPanel({ editor }: { editor: Editor | null }) {
   const spotlight = useUiStore((s) => s.spotlight);
   const crowd = useUiStore((s) => s.crowd);
   const shapes = useUiStore((s) => s.stats.shapes);
-  useNow(open && voting);
+  const title = useUiStore((s) => s.title);
+  const [topic, setTopic] = useState("");
+  useNow(open);
   const used = editor && voting ? editor.myVotes() : 0;
   void shapes;
   const close = (): void => useUiStore.getState().setRitualsOpen(false);
@@ -173,7 +175,44 @@ export function RitualsPanel({ editor }: { editor: Editor | null }) {
               tint="#dd2f6e"
             />
             <Toggle icon="eye" title="Spotlight me" detail="Everyone on the board follows your view" on={spotlight} onChange={(on) => editor.setSpotlight(on)} tint="#19c3a5" />
-            <Toggle icon="hand" title="Simulate a team" detail="8 bot teammates join and work live" on={crowd} onChange={(on) => (on ? editor.crowd.start() : editor.crowd.stop())} tint="#7b6cff" />
+            <section className="rounded-2xl border border-line bg-field p-3">
+              <div className="flex items-center gap-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#7b6cff] text-white" style={{ boxShadow: crowd ? "0 0 20px #7b6cff" : undefined }}>
+                  <Icon name="hand" className="h-4 w-4" />
+                </span>
+                <span className="flex-1">
+                  <span className="block text-[13px] font-bold text-ink">AI team session</span>
+                  <span className="block text-[11px] text-muted">8 bot teammates brainstorm, organize and vote — in their own frame, never on your work</span>
+                </span>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Enter" && !crowd) editor.crowd.start(topic);
+                  }}
+                  disabled={crowd}
+                  maxLength={120}
+                  placeholder={title ? `Topic (default: ${title})` : "Topic, e.g. Grow our newsletter"}
+                  className="h-10 min-w-0 flex-1 rounded-xl border border-line bg-paper px-3 text-[13px] text-ink outline-none placeholder:text-muted focus:border-accent disabled:opacity-60"
+                />
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => (crowd ? editor.crowd.stop() : editor.crowd.start(topic))}
+                  className={`h-10 shrink-0 rounded-xl px-4 text-[13px] font-bold ${crowd ? "border border-line text-ink hover:bg-hover" : "bg-[#7b6cff] text-white"}`}
+                >
+                  {crowd ? "Stop" : "Start"}
+                </motion.button>
+              </div>
+              {!crowd && editor.crowd.hasWork && (
+                <button type="button" onClick={() => editor.crowd.cleanup()} className="mt-2 flex w-full items-center justify-center gap-1.5 text-[12px] font-semibold text-muted hover:text-bad">
+                  <Icon name="trash" className="h-3.5 w-3.5" /> Remove the session's frame and notes
+                </button>
+              )}
+            </section>
             <motion.button
               type="button"
               whileHover={{ y: -2 }}

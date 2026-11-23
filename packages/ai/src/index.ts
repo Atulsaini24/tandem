@@ -30,6 +30,8 @@ export {
   NODE_SIZE,
   buildDiagramMessages,
   buildInsightMessages,
+  countCrossings,
+  orderLayers,
   layoutDiagram,
   runDiagram,
   runInsight,

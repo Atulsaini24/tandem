@@ -15,6 +15,7 @@ import { PresentMode } from "../ui/PresentMode";
 import { RadialMenu } from "../ui/RadialMenu";
 import { RitualsPanel, TimerPill } from "../ui/Rituals";
 import { Toolbar } from "../ui/Toolbar";
+import { TeamBar } from "../ui/TeamBar";
 import { Tour } from "../ui/Tour";
 import { useUiStore } from "../state/ui-store";
 import { TopBar } from "../ui/TopBar";
@@ -59,6 +60,7 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
       )}
       <div className="pointer-events-none absolute inset-0">
         <TimerPill editor={editor} />
+        {!presenting && <TeamBar editor={editor} />}
         <Notice />
       </div>
       <LabelEditor editor={editor} />

@@ -5,9 +5,24 @@ import { applyTheme, loadPreference, resolveTheme, savePreference, type Theme, t
 
 export type Tool = "select" | "hand" | "rect" | "ellipse" | "diamond" | "text" | "note" | "arrow" | "pen" | "frame" | "comment";
 
+/** A simulated team session's phase (see canvas/crowd.ts). */
+export type TeamPhase = "thinking" | "brainstorm" | "organize" | "vote" | "done";
+
+export interface TeamUiState {
+  readonly phase: TeamPhase;
+  readonly topic: string;
+  /** Steps finished in this phase, of `total`. */
+  readonly done: number;
+  readonly total: number;
+  /** The winning idea, once voting is over. */
+  readonly top: string | undefined;
+}
+
 export interface AiUiState {
   readonly status: "idle" | "thinking" | "writing" | "done" | "error" | "cancelled";
   readonly mode?: "generate" | "organize" | "diagram" | "insight";
+  /** Where the last finished result is on the board (for "Show result"). */
+  readonly result?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /** Insight mode: the summary, shown in the panel too. */
   readonly summary?: string;
   /** Cards placed so far in this run. */
@@ -99,6 +114,8 @@ interface UiState {
   readonly radial: { readonly x: number; readonly y: number; readonly target: NodeId | undefined } | undefined;
   /** The simulated team (bots) is running. */
   readonly crowd: boolean;
+  readonly team: TeamUiState | undefined;
+  setTeam(team: TeamUiState | undefined): void;
   readonly ritualsOpen: boolean;
   setVoting(voting: boolean): void;
   setTimer(timer: { end: number; total: number; paused: number }): void;
@@ -174,6 +191,8 @@ export const useUiStore = create<UiState>()((set) => ({
   spotlightBy: undefined,
   radial: undefined,
   crowd: false,
+  team: undefined,
+  setTeam: (team) => set({ team }),
   ritualsOpen: false,
   setVoting: (voting) => set({ voting }),
   setTimer: (timer) => set({ timer }),

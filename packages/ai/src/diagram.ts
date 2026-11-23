@@ -330,6 +330,70 @@ function ranks(nodes: readonly DiagramNode[], edges: readonly DiagramEdge[]): Ma
 }
 
 /**
+ * Arrow crossings between adjacent layers: edges (a→b), (c→d) cross when their ends are
+ * in opposite order. The number the layout tries to keep small.
+ */
+export function countCrossings(layers: ReadonlyMap<number, readonly DiagramNode[]>, edges: readonly DiagramEdge[]): number {
+  const where = new Map<string, { rank: number; index: number }>();
+  for (const [rank, layer] of layers) layer.forEach((n, index) => where.set(n.id, { rank, index }));
+  const spans = edges.flatMap((e) => {
+    const a = where.get(e.from);
+    const b = where.get(e.to);
+    if (!a || !b || Math.abs(a.rank - b.rank) !== 1) return [];
+    return a.rank < b.rank ? [{ rank: a.rank, top: a.index, bottom: b.index }] : [{ rank: b.rank, top: b.index, bottom: a.index }];
+  });
+  let crossings = 0;
+  for (let i = 0; i < spans.length; i++) {
+    for (let j = i + 1; j < spans.length; j++) {
+      const p = spans[i];
+      const q = spans[j];
+      if (p && q && p.rank === q.rank && (p.top - q.top) * (p.bottom - q.bottom) < 0) crossings += 1;
+    }
+  }
+  return crossings;
+}
+
+/**
+ * Reorder each layer so connected nodes line up (the barycenter heuristic): sweep down
+ * and up a few times, sorting every layer by the average position of its neighbours in
+ * the layer before. Keeps the best ordering seen, so it never makes things worse.
+ */
+export function orderLayers(layers: Map<number, DiagramNode[]>, edges: readonly DiagramEdge[]): void {
+  const ranks = [...layers.keys()].sort((a, b) => a - b);
+  const neighbours = new Map<string, string[]>();
+  for (const e of edges) {
+    neighbours.set(e.from, [...(neighbours.get(e.from) ?? []), e.to]);
+    neighbours.set(e.to, [...(neighbours.get(e.to) ?? []), e.from]);
+  }
+  const snapshot = (): Map<number, DiagramNode[]> => new Map([...layers].map(([r, l]) => [r, [...l]]));
+  let best = snapshot();
+  let bestCrossings = countCrossings(layers, edges);
+  const sortBy = (rank: number, against: number): void => {
+    const layer = layers.get(rank);
+    const ref = layers.get(against);
+    if (!layer || !ref) return;
+    const index = new Map(ref.map((n, i) => [n.id, i]));
+    const keyed = layer.map((n, i) => {
+      const pos = (neighbours.get(n.id) ?? []).flatMap((m) => (index.has(m) ? [index.get(m) ?? 0] : []));
+      return { n, key: pos.length > 0 ? pos.reduce((a, b) => a + b, 0) / pos.length : i };
+    });
+    keyed.sort((a, b) => a.key - b.key);
+    layers.set(rank, keyed.map((k) => k.n));
+  };
+  for (let sweep = 0; sweep < 6 && bestCrossings > 0; sweep++) {
+    if (sweep % 2 === 0) for (let i = 1; i < ranks.length; i++) sortBy(ranks[i] ?? 0, ranks[i - 1] ?? 0);
+    else for (let i = ranks.length - 2; i >= 0; i--) sortBy(ranks[i] ?? 0, ranks[i + 1] ?? 0);
+    const crossings = countCrossings(layers, edges);
+    if (crossings < bestCrossings) {
+      bestCrossings = crossings;
+      best = snapshot();
+    }
+  }
+  layers.clear();
+  for (const [r, l] of best) layers.set(r, l);
+}
+
+/**
  * Final positions. Flowcharts flow left to right in layers (each layer centered
  * vertically); mind maps radiate from the first node, each branch keeping its own sector.
  */
@@ -343,6 +407,7 @@ export function layoutDiagram(kind: DiagramKind, nodes: readonly DiagramNode[], 
       const r = rank.get(n.id) ?? 0;
       layers.set(r, [...(layers.get(r) ?? []), n]);
     }
+    orderLayers(layers, edges);
     const gapX = 110;
     const gapY = 60;
     const tallest = Math.max(...[...layers.values()].map((layer) => layer.reduce((h, n) => h + NODE_SIZE[n.shape].h, 0) + (layer.length - 1) * gapY));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
-import { DiagramReader, InsightReader, buildInsightMessages, layoutDiagram, type DiagramEvent } from "../src/index.js";
+import { DiagramReader, InsightReader, buildInsightMessages, countCrossings, layoutDiagram, orderLayers, type DiagramEvent } from "../src/index.js";
 
 /** Feed text in random-sized chunks, as a network stream would. */
 function feed<T>(reader: { push(chunk: string): T[] }, text: string, sizes: readonly number[]): T[] {
@@ -123,5 +123,29 @@ describe("insights", () => {
   it("sends the board's text within a budget", () => {
     const messages = buildInsightMessages("", Array.from({ length: 500 }, (_, i) => `Item number ${i} `.repeat(4)));
     expect(messages[1]?.content.length).toBeLessThan(6_200);
+  });
+});
+
+describe("flowchart crossings", () => {
+  it("reorders layers so arrows cross less, never more", () => {
+    const n = (id: string) => ({ id, shape: "step" as const });
+    // Layer 1 lists b before a, but a's children come first in layer 2: two crossings.
+    const layers = new Map([
+      [0, [n("root")]],
+      [1, [n("b"), n("a")]],
+      [2, [n("a1"), n("a2"), n("b1"), n("b2")]],
+    ]);
+    const edges = [
+      { from: "root", to: "a" },
+      { from: "root", to: "b" },
+      { from: "a", to: "a1" },
+      { from: "a", to: "a2" },
+      { from: "b", to: "b1" },
+      { from: "b", to: "b2" },
+    ];
+    const before = countCrossings(layers, edges);
+    orderLayers(layers, edges);
+    expect(before).toBeGreaterThan(0);
+    expect(countCrossings(layers, edges)).toBe(0);
   });
 });

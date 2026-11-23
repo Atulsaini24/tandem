@@ -537,8 +537,23 @@ that pulls back mid-way). Spotlight and laser are two flag bits in presence (D05
 "everyone follow me" and the red trail need no new message types and vanish when the
 presenter disconnects. A follower who moves their own view stops following.
 
-## D062 — The simulated team uses the real paths
-"Simulate a team" adds eight bots as entries in Peers and edits through the editor's own
-methods, so their cursors, selections, chat, reactions, votes and edits exercise exactly
-the code real collaborators do, and sync to other tabs. Limits keep it readable: at most
-36 bot shapes and 8 connectors, each between near neighbours.
+## D062 — The simulated team works in its own space, on its own content
+The first version had eight bots doing random things all over the board: dragging the
+user's notes, wiring connectors between unrelated shapes, voting on everything. On a real
+board (a flowchart plus a mind map) it made a mess within minutes and never finished.
+Rebuilt as a short, scripted team session with one hard rule: bots only touch what they
+created, inside their own frame, placed in empty space beside the board. The session has
+phases (the local AI writes themed ideas → bots write them as notes → sort them into
+columns → dot-vote → the winner is highlighted) and then ends; a session bar shows the
+phase and progress, and "Remove" deletes the frame and its notes in one step. Tested: the
+user's shapes are byte-for-byte unchanged after a full session, every session shape is
+inside the frame, and Remove restores the original board. Bots still go through the
+editor and Peers like real collaborators, so their work syncs to other tabs.
+
+## D063 — Flowcharts reorder layers to minimize crossing arrows; AI results go in free space
+Flowchart layers were stacked in the order the model wrote nodes, so arrows often crossed.
+Each layer is now sorted by the average position of its neighbours (the barycenter
+heuristic), sweeping down and up and keeping the ordering with the fewest crossings, so it
+never gets worse. AI results (boards, diagrams) now go to empty space to the right of
+everything on the board, with the camera flying there first, instead of on top of what's
+in view; the AI panel's result card can jump back to the result or undo the run.

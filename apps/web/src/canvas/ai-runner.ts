@@ -78,7 +78,7 @@ export class AiRunner {
     this.#abort = abort;
     const editor = this.#editor;
     const group = editor.beginGroup();
-    const origin = this.#freeSpot();
+    const origin = this.#freeSpot(kind === "mindmap" ? 2200 : 1700, kind === "mindmap" ? 1300 : 700);
     const ids = new Map<string, NodeId>();
     const nodes: DiagramNode[] = [];
     const edges: Array<{ from: string; to: string }> = [];
@@ -120,7 +120,7 @@ export class AiRunner {
           }
           const all = boundsOf([...rects.values()]);
           if (titleId && all) editor.aiMove(titleId, { x: all.x, y: all.y - 80, w: Math.max(320, Math.min(all.w, 900)), h: 40 }, group);
-          if (all) editor.fitTo({ x: all.x, y: all.y - 90, w: all.w, h: all.h + 90 });
+          if (all) this.#show({ x: all.x, y: all.y - 90, w: all.w, h: all.h + 90 });
           useUiStore.getState().setAi({
             status: "done",
             items: event.nodes,
@@ -192,7 +192,7 @@ export class AiRunner {
             message: event.rejected > 0 ? `${event.rejected} invalid line${event.rejected === 1 ? "" : "s"} ignored` : "",
             ...(event.tokensPerSecond === undefined ? {} : { tokensPerSecond: event.tokensPerSecond }),
           });
-          editor.fitTo({ x, y: y - 40, w: W, h: height + 40 });
+          this.#show({ x, y: y - 40, w: W, h: height + 40 });
         }
       }
     } catch (error) {
@@ -257,7 +257,7 @@ export class AiRunner {
           });
         }
       }
-      if (placed.length > 0) this.#editor.fitTo(bounds(placed));
+      if (placed.length > 0) this.#show(bounds(placed));
     } catch (error) {
       if (abort.signal.aborted) {
         useUiStore.getState().setAi({ status: "cancelled", finishedAt: Date.now(), message: "Stopped. What was placed stays (Ctrl+Z removes it)." });
@@ -303,12 +303,21 @@ export class AiRunner {
     }
   }
 
-  /** Top-left of the visible area, with a margin: the board starts where the user is looking. */
-  #freeSpot(): Point {
-    const renderer = this.#editor.renderer;
-    // The finished board may be wider than the view; fitTo() reframes it when done.
-    const world = renderer.screenToWorld({ x: 80, y: 120 });
-    return { x: Math.round(world.x), y: Math.round(world.y) };
+  /**
+   * Where a new result goes: empty space beside the board (never on top of existing
+   * work), with the camera flying there first so you watch it stream in.
+   */
+  #freeSpot(w = 900, h = 620): Point {
+    const editor = this.#editor;
+    const spot = editor.freeSpot(w, h);
+    if (editor.scene.size > 0) editor.renderer.fitTo({ x: spot.x - 40, y: spot.y - 100, w: w + 80, h: h + 140 }, 40, useUiStore.getState().aiOpen ? 372 : 0, 1, 800, true);
+    return spot;
+  }
+
+  /** Frame the finished result and remember it, for the panel's "Show result". */
+  #show(rect: Rect): void {
+    this.#editor.fitTo(rect);
+    useUiStore.getState().setAi({ status: useUiStore.getState().ai.status, result: rect });
   }
 }
 
