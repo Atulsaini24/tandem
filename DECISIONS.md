@@ -623,3 +623,43 @@ qwen3:8b, and its schema-constrained output is good enough for every mode: a cha
 about 30 s, an 8-slide deck about 2.5 minutes. Prompts now state today's date, since models
 otherwise date roadmaps in their training year.
 
+## D071 — Studio: designed shapes are edited as forms, with a live preview
+A slide or chart is one designed shape (D067), so it can't be edited box by box on the
+canvas. Double-clicking it opens Studio: the real design, live, on the left (with its
+build-in animation), and every field on the right: layout (shown as live thumbnails of
+this slide's own content in all 14 layouts), theme (for one slide or the whole deck),
+text, items, stats, columns, axes, and for charts a data grid with spreadsheet paste,
+sorting and KPIs worked out from the data. Edits save as you type into the shared spec, so
+collaborators see them live, and one Studio session undoes as one step. The AI is one
+instruction away ("make it punchier", "show it as a donut"): it rewrites the spec, and the
+app validates the result like any other.
+
+## D072 — Decks stream: outline first, then each slide in its own request
+One request for a whole deck kept people waiting and squeezed every slide into one answer.
+Now the outline streams: each slide appears as a placeholder the moment its line is
+planned (about 5 s on this laptop). Once the outline is complete, each slide is written in
+its own request with the whole storyline as context (writing during the outline only slowed
+the outline down). With Ollama's default of one request at a time the
+total is about the same as before (~150 s for 8 slides); with `OLLAMA_NUM_PARALLEL=2` two
+slides are written at once. A slide whose layout comes back empty becomes a bold statement
+slide instead of a broken one.
+
+## D073 — Templates are data, generated from a small kit
+48 templates in 8 categories (presentations, dashboards, planning, strategy, diagrams,
+workshops, 3D, education) are built from a handful of helpers in `template-kit.ts` (decks,
+chart grids, labeled blocks, trees, columns), so each one is a short description of content
+rather than hand-placed coordinates. A test builds every template and checks that keys are
+unique, arrows point at real shapes, and every slide and chart parses.
+
+## D074 — An Insert panel for designed things, no AI needed
+Charts, slides and 3D scenes could only come from the AI. The Insert tab adds any of the 14
+slide layouts (in any of 10 themes), 9 chart types or 6 3D presets with sample content,
+placed in free space and selected, ready for Studio.
+
+## D075 — The demo video is recorded by a script, with nothing to install
+`scripts/record-demo.mjs` drives Chrome over the DevTools protocol (Node's built-in
+WebSocket), captures frames with `Page.startScreencast`, and encodes them inside Chrome with
+canvas + MediaRecorder, so there's no ffmpeg or Playwright dependency. The merge scene's
+split-screen page is served by intercepting one URL on the app's own origin, so it can
+reach both editors without adding a page to the app.
+

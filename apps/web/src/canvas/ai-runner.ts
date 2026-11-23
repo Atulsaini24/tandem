@@ -8,7 +8,10 @@ import {
   buildChartMessages,
   buildSceneMessages,
   layoutDiagram,
-  runDeck,
+  runDeckFast,
+  buildSlideRewriteMessages,
+  buildChartRewriteMessages,
+  SLIDE_SCHEMA,
   runJson,
   runDiagram,
   runInsight,
@@ -274,8 +277,9 @@ export class AiRunner {
   }
 
   /**
-   * A slide deck: each slide is a frame holding one designed slide (960×540), placed the
-   * moment the model finishes it; then Present mode plays them with animated reveals.
+   * A slide deck, fast: the outline comes first and every slide appears at once as a
+   * placeholder (960×540 frame + designed slide); then slides are written two at a time
+   * and each one builds in the moment it lands. Present mode plays the deck at the end.
    */
   async deck(prompt: string): Promise<void> {
     if (this.#abort) return;
@@ -286,44 +290,115 @@ export class AiRunner {
     const H = SLIDE_H;
     const GAP = 120;
     const notes = editor.scene.ordered().flatMap((s) => (s.label?.trim() && s.kind !== "frame" && editor.selected().some((x) => x.id === s.id) ? [s.label] : []));
-    const origin = this.#freeSpot(W * 2 + GAP, H);
     const group = editor.beginGroup();
     const frames: NodeId[] = [];
-    const slides: Array<{ id: NodeId; data: Record<string, unknown> }> = [];
+    const slides = new Map<number, { id: NodeId; base: Record<string, unknown> }>();
+    let origin = { x: 0, y: 0 };
+    let cols = 4;
+    let written = 0;
+    let total = 0;
     let deckTitle = "";
     let theme = "";
-    useUiStore.getState().setAi({ status: "thinking", mode: "deck", items: 0, startedAt: Date.now(), message: "", tokensPerSecond: 0 });
+    useUiStore.getState().setAi({ status: "thinking", mode: "deck", items: 0, startedAt: Date.now(), message: "Planning the storyline…", tokensPerSecond: 0 });
     try {
-      for await (const event of runDeck(prompt, notes, llm(abort.signal))) {
-        if (event.type === "title") {
+      for await (const event of runDeckFast(prompt, notes, llm(abort.signal), 2)) {
+        if (event.type === "plan") {
           deckTitle = event.title || prompt.slice(0, 60);
           theme = SLIDE_THEMES.includes(event.theme as SlideThemeName) ? event.theme : hashTheme(deckTitle);
-        } else if (event.type === "slide") {
-          const x = origin.x + event.slide.index * (W + GAP);
-          const y = origin.y;
-          const data = { ...event.slide.raw, theme, deck: deckTitle, index: event.slide.index, total: 0 };
-          const frame = editor.aiCreate({ kind: "frame", x, y, w: W, h: H, fill: 0x2f63ff, label: `${event.slide.index + 1}. ${event.slide.title}`.slice(0, 120) }, group);
-          const id = editor.aiCreate({ kind: "slide", x, y, w: W, h: H, fill: 0x111318, data: JSON.stringify(data), label: event.slide.title }, group);
-          frames.push(frame);
-          slides.push({ id, data });
+          cols = 4;
+          origin = this.#freeSpot(cols * (W + GAP), 3 * (H + GAP));
+          editor.renderer.fitTo({ x: origin.x - 60, y: origin.y - 100, w: cols * (W + GAP), h: 2 * (H + GAP) + 60 }, 40, 0, 1, 900, true);
+          useUiStore.getState().setAi({ status: "writing", items: 0, message: "Planning the storyline…" });
+        } else if (event.type === "placeholder") {
+          const s = event.slide;
+          const x = origin.x + (s.index % cols) * (W + GAP);
+          const y = origin.y + Math.floor(s.index / cols) * (H + GAP);
+          const base = { theme, deck: deckTitle, index: s.index, total: 0, kicker: s.kicker, title: s.title, layout: s.layout };
+          frames.push(editor.aiCreate({ kind: "frame", x, y, w: W, h: H, fill: 0x2f63ff, label: `${s.index + 1}. ${s.title}`.slice(0, 120) }, group));
+          const id = editor.aiCreate({ kind: "slide", x, y, w: W, h: H, fill: 0x111318, label: s.title, data: JSON.stringify({ ...base, subtitle: s.brief, pending: true }) }, group);
+          slides.set(s.index, { id, base });
           useUiStore.getState().reveal([id]);
-          editor.renderer.fitTo({ x: x - 40, y: y - 80, w: W + 80, h: H + 120 }, 40, 0, 1, 700, true);
-          useUiStore.getState().setAi({ status: "writing", items: frames.length });
+        } else if (event.type === "planned") {
+          total = event.total;
+          useUiStore.getState().setAi({ status: "writing", items: written, message: `Writing ${total} slides…` });
+        } else if (event.type === "slide") {
+          const target = slides.get(event.slide.index);
+          if (!target) continue;
+          const raw = event.slide.raw;
+          const data = { ...raw, ...target.base, layout: typeof raw.layout === "string" ? raw.layout : target.base.layout, title: event.slide.title, pending: false };
+          editor.updateShapes([{ id: target.id, patch: { data: JSON.stringify(data), label: event.slide.title } }], group);
+          useUiStore.getState().reveal([target.id], 80);
+          written += 1;
+          useUiStore.getState().setAi({ status: "writing", items: written, message: `${written} of ${total || slides.size} slides written` });
+        } else if (event.type === "failed") {
+          const target = slides.get(event.index);
+          if (target) editor.updateShapes([{ id: target.id, patch: { data: JSON.stringify({ ...target.base, layout: "statement", pending: false }) } }], group);
         } else if (event.type === "done") {
-          // Now the deck size is known: number the slides "03 / 09".
+          // Now the deck size is known everywhere: number the slides "03 / 08".
+          const n = slides.size;
           editor.updateShapes(
-            slides.map((s) => ({ id: s.id, patch: { data: JSON.stringify({ ...s.data, total: slides.length }) } })),
+            [...slides.values()].flatMap(({ id }) => {
+              try {
+                return [{ id, patch: { data: JSON.stringify({ ...(JSON.parse(editor.scene.get(id)?.data ?? "{}") as Record<string, unknown>), total: n }) } }];
+              } catch {
+                return [];
+              }
+            }),
             group,
           );
           useUiStore.getState().setAi({ status: "done", items: event.slides, finishedAt: Date.now(), message: "Playing it now in Present mode — arrows to move, Esc to stop", ...(event.tokensPerSecond === undefined ? {} : { tokensPerSecond: event.tokensPerSecond }) });
           if (frames.length > 0) {
-            useUiStore.getState().setAi({ status: "done", result: { x: origin.x, y: origin.y - 40, w: frames.length * (W + GAP), h: H + 80 } });
-            setTimeout(() => editor.startPresenting(frames), 600);
+            useUiStore.getState().setAi({ status: "done", result: { x: origin.x, y: origin.y - 40, w: cols * (W + GAP), h: Math.ceil(frames.length / cols) * (H + GAP) + 40 } });
+            setTimeout(() => editor.startPresenting(frames), 700);
           }
         }
       }
     } catch (error) {
       this.#fail(error, abort);
+    } finally {
+      this.#abort = undefined;
+    }
+  }
+
+  /** Change a chart following an instruction; false when it didn't work. */
+  async rewriteChart(id: NodeId, instruction: string): Promise<boolean> {
+    const editor = this.#editor;
+    const shape = editor.scene.get(id);
+    if (!shape?.data || this.#abort) return false;
+    const abort = new AbortController();
+    this.#abort = abort;
+    try {
+      const current = JSON.parse(shape.data) as Record<string, unknown>;
+      const { value } = await runJson(buildChartRewriteMessages(current, instruction), CHART_SCHEMA, llm(abort.signal));
+      const next = { ...current, ...(typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {}), palette: current.palette };
+      if (!parseChart(JSON.stringify(next))) return false;
+      editor.updateShapes([{ id, patch: { data: JSON.stringify(next) } }], editor.beginGroup());
+      useUiStore.getState().reveal([id]);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      this.#abort = undefined;
+    }
+  }
+
+  /** Rewrite one designed slide following an instruction; false when it didn't work. */
+  async rewriteSlide(id: NodeId, instruction: string): Promise<boolean> {
+    const editor = this.#editor;
+    const shape = editor.scene.get(id);
+    if (!shape?.data || this.#abort) return false;
+    const abort = new AbortController();
+    this.#abort = abort;
+    try {
+      const current = JSON.parse(shape.data) as Record<string, unknown>;
+      const { value } = await runJson(buildSlideRewriteMessages(current, instruction, String(current.deck ?? "")), SLIDE_SCHEMA, llm(abort.signal));
+      if (typeof value !== "object" || value === null) return false;
+      const keep = { theme: current.theme, deck: current.deck, index: current.index, total: current.total };
+      editor.updateShapes([{ id, patch: { data: JSON.stringify({ ...current, ...(value as Record<string, unknown>), ...keep, pending: false }) } }], editor.beginGroup());
+      useUiStore.getState().reveal([id]);
+      return true;
+    } catch {
+      return false;
     } finally {
       this.#abort = undefined;
     }

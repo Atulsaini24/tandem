@@ -136,3 +136,18 @@ canvas {
 @media (prefers-reduced-motion: reduce) {
   .marquee-left, .marquee-right { animation: none; }
 }
+
+/* Present mode: the current slide keeps moving. */
+.reveal.live .a-drift { animation: rv-drift 16s ease-in-out infinite alternate; }
+.reveal.live .a-drift2 { animation: rv-drift2 19s ease-in-out infinite alternate; }
+.reveal.live .a-orbit { animation: rv-orbit 48s linear infinite; }
+@keyframes rv-drift { to { transform: translate(-70px, 46px) scale(1.18); } }
+@keyframes rv-drift2 { to { transform: translate(80px, -36px) scale(1.12); } }
+@keyframes rv-orbit { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .reveal.live * { animation: none !important; }
+}
+
+/* Placeholder slides while the AI writes them. */
+.reveal .a-shimmer { animation: rv-shimmer 1.6s ease-in-out infinite; }
+@keyframes rv-shimmer { 50% { opacity: 0.45; } }

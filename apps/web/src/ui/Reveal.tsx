@@ -14,8 +14,20 @@ const DURATION = 3200;
  */
 export function Reveal({ editor }: { editor: Editor | null }) {
   const reveals = useUiStore((s) => s.reveals);
+  const presenting = useUiStore((s) => s.presenting);
   const [now, setNow] = useState(() => Date.now());
-  const active = Object.entries(reveals).filter(([, at]) => now - at < DURATION);
+  // While presenting, the current slide stays live: its light drifts and its art turns.
+  const frameId = presenting?.slides[presenting.index];
+  const live = useMemo(() => {
+    const frame = frameId && editor ? editor.scene.get(frameId) : undefined;
+    if (!frame || !editor) return [] as string[];
+    return editor.scene
+      .ordered()
+      .filter((s) => (s.kind === "slide" || s.kind === "chart") && s.x + s.w / 2 > frame.x && s.x + s.w / 2 < frame.x + frame.w && s.y + s.h / 2 > frame.y && s.y + s.h / 2 < frame.y + frame.h)
+      .map((s) => s.id);
+  }, [frameId, editor]);
+  const active = Object.entries(reveals).filter(([id, at]) => now - at < DURATION || live.includes(id));
+  for (const id of live) if (!active.some(([a]) => a === id)) active.push([id, 0]);
   const any = active.length > 0;
   useEffect(() => {
     if (!any) return;
@@ -28,13 +40,13 @@ export function Reveal({ editor }: { editor: Editor | null }) {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       {active.map(([id, at]) => (
-        <Live key={`${id}:${at}`} editor={editor} id={id} at={at} />
+        <Live key={`${id}:${at}`} editor={editor} id={id} at={at} live={live.includes(id)} />
       ))}
     </div>
   );
 }
 
-function Live({ editor, id, at }: { editor: Editor; id: string; at: number }) {
+function Live({ editor, id, at, live }: { editor: Editor; id: string; at: number; live: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   // Fixed once: changing an animation's delay mid-flight would restart it.
   const [base] = useState(() => Math.max(0, at - Date.now()));
@@ -61,7 +73,7 @@ function Live({ editor, id, at }: { editor: Editor; id: string; at: number }) {
   return (
     <div
       ref={ref}
-      className="reveal absolute left-0 top-0 origin-top-left"
+      className={`reveal absolute left-0 top-0 origin-top-left ${live ? "live" : ""}`}
       style={{ width: w, height: h, ["--base" as string]: `${base}ms` }}
       // The SVG is our own output (charts.ts / slides.ts escape every string they draw).
       dangerouslySetInnerHTML={{ __html: svg }}

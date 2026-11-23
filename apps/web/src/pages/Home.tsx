@@ -269,13 +269,13 @@ function Numbers() {
 
 const FEATURES: ReadonlyArray<{ icon: IconName; title: string; body: string; span?: string; tint: string }> = [
   { icon: "eye", title: "Present mode", body: "Frames become slides. The camera flies between them, designed slides build themselves in, and everyone follows along — with a glowing laser pointer.", span: "sm:col-span-2 lg:row-span-2", tint: "#7b6cff" },
-  { icon: "panel", title: "Pro editor", body: "Pages, layers, and an inspector with exact X, Y, size and rotation.", tint: "#2f63ff" },
+  { icon: "panel", title: "Studio editor", body: "Double-click any slide or chart: live preview, every field, a data grid, spreadsheet paste and AI rewrites.", tint: "#2f63ff" },
   { icon: "chart", title: "Charts that build in", body: "Nine chart types with KPIs and insights. Bars grow, lines draw.", tint: "#22c3a6" },
   { icon: "cube", title: "3D on the canvas", body: "Planets, cities, rockets — lit, glowing, and yours to orbit.", tint: "#b36bff" },
-  { icon: "slides", title: "Designed decks", body: "Six themes and nine layouts: title, agenda, cards, big numbers, charts, timelines, comparisons, quotes and a closing ask. Restyle a whole deck in one click.", span: "sm:col-span-2", tint: "#ff7a59" },
+  { icon: "slides", title: "Designed decks", body: "Ten themes and fourteen layouts — statement, team, pricing, process, 2×2 matrix, timeline, charts and more. Decks stream in slide by slide, and the slide on stage keeps moving.", span: "sm:col-span-2", tint: "#ff7a59" },
   { icon: "arrow", title: "Quick-connect", body: "Hover a shape, click a + and the next step appears already connected.", tint: "#38b6ff" },
   { icon: "star", title: "Dot voting & timer", body: "Run a retro in minutes: vote on notes, share a countdown.", tint: "#ffb020" },
-  { icon: "command", title: "Everything in ⌘K", body: "Every tool, template and action, a few keystrokes away — plus cursor chat, reactions, follow and spotlight.", span: "sm:col-span-2", tint: "#ff4f8b" },
+  { icon: "command", title: "48 templates, one click", body: "Pitch decks, dashboards, OKRs, canvases, journey maps, org charts and 3D scenes — plus an Insert panel for any slide, chart or scene.", span: "sm:col-span-2", tint: "#ff4f8b" },
   { icon: "download", title: "PNG · SVG · PDF", body: "Vector-perfect export of the board or just the selection.", tint: "#52d36b" },
   { icon: "share", title: "Signed share links", body: "Edit or view-only, enforced by the server. Works offline, merges on reconnect.", span: "sm:col-span-2", tint: "#e85cff" },
 ];

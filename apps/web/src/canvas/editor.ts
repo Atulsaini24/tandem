@@ -350,7 +350,7 @@ export class Editor {
     }
     if (shape.kind === "chart" || shape.kind === "slide") {
       this.select([id]);
-      useUiStore.getState().setAiOpen(false); // the Design tab has the chart controls
+      useUiStore.getState().setStudio(id);
       return;
     }
     this.select([id]);

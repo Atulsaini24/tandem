@@ -100,7 +100,7 @@ export function EmptyState({ editor }: { editor: Editor | null }) {
               Start from a template, press <Kbd>N</Kbd> for a sticky note, <Kbd>A</Kbd> to connect shapes, or ask the AI.
             </p>
             <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {TEMPLATES.map((t, i) => (
+              {TEMPLATES.slice(0, 4).map((t, i) => (
                 <motion.button
                   key={t.id}
                   type="button"
@@ -123,7 +123,23 @@ export function EmptyState({ editor }: { editor: Editor | null }) {
                 type="button"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ ...spring, delay: 0.05 * TEMPLATES.length }}
+                transition={{ ...spring, delay: 0.2 }}
+                whileHover={{ y: -3 }}
+                onClick={() => {
+                  setDismissed(true);
+                  useUiStore.getState().setGalleryOpen(true);
+                }}
+                className="rounded-2xl border border-ink/15 bg-ink p-3 text-left text-paper"
+              >
+                <span className="mb-1.5 block text-[18px]">✨</span>
+                <span className="block text-[13px] font-bold">Browse all {TEMPLATES.length}</span>
+                <span className="mt-0.5 block text-[11px] leading-snug text-paper/70">Decks, dashboards, canvases, 3D…</span>
+              </motion.button>
+              <motion.button
+                type="button"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ ...spring, delay: 0.25 }}
                 whileHover={{ y: -3 }}
                 onClick={() => {
                   setDismissed(true);

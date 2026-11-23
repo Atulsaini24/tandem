@@ -38,9 +38,21 @@ export interface ChartSpec {
   readonly insight: string;
   /** Headline numbers above the plot. */
   readonly kpis: readonly Kpi[];
+  readonly palette: ChartPalette;
 }
 
 export const CHART_COLORS = ["#4f7cff", "#ff7a59", "#22c3a6", "#8b6cff", "#ffb547", "#ff5c8a", "#43d17a", "#38b6ff"] as const;
+
+export type ChartPalette = "vivid" | "ocean" | "sunset" | "forest" | "neon" | "mono";
+export const CHART_PALETTES: Record<ChartPalette, readonly string[]> = {
+  vivid: CHART_COLORS,
+  ocean: ["#0ea5e9", "#22d3ee", "#6366f1", "#14b8a6", "#38bdf8", "#818cf8", "#2dd4bf", "#60a5fa"],
+  sunset: ["#ff6a3d", "#ffb547", "#e8457c", "#ff8f6b", "#c2410c", "#f472b6", "#fbbf24", "#fb7185"],
+  forest: ["#16a34a", "#84cc16", "#0d9488", "#65a30d", "#22c55e", "#a3e635", "#14b8a6", "#4ade80"],
+  neon: ["#ff2fd6", "#22e5ff", "#a855f7", "#facc15", "#34d399", "#f472b6", "#60a5fa", "#fb923c"],
+  mono: ["#3b82f6", "#64748b", "#94a3b8", "#1e40af", "#cbd5e1", "#475569", "#93c5fd", "#334155"],
+};
+export const CHART_PALETTE_NAMES = Object.keys(CHART_PALETTES) as ChartPalette[];
 
 const MAX_POINTS = 12;
 const MAX_SERIES = 4;
@@ -97,6 +109,7 @@ export function parseChart(data: string | undefined): ChartSpec | undefined {
     note: short || !unit ? note : [unit, note].filter(Boolean).join(" · ").slice(0, 90),
     insight: clean(r.insight, 220),
     kpis,
+    palette: CHART_PALETTE_NAMES.includes(r.palette as ChartPalette) ? (r.palette as ChartPalette) : "vivid",
   };
 }
 
@@ -151,11 +164,14 @@ interface Box {
   readonly h: number;
 }
 
-const color = (i: number): string => CHART_COLORS[i % CHART_COLORS.length] ?? "#4f7cff";
+// The palette of the chart being drawn (drawing is synchronous, so one at a time).
+let colors: readonly string[] = CHART_COLORS;
+const color = (i: number): string => colors[i % colors.length] ?? "#4f7cff";
 
 /** Draw a chart as a standalone SVG of size w×h. Without a card it sits on someone else's background (slides). */
 export function chartSvg(spec: ChartSpec, w: number, h: number, theme: ChartTheme, withCard = true): string {
   const P = `c${(uid++).toString(36)}`;
+  colors = CHART_PALETTES[spec.palette] ?? CHART_COLORS;
   const s = Math.max(0.75, Math.min(1.6, Math.min(w / 760, h / 500)));
   const pad = withCard ? Math.round(Math.max(18, Math.min(34, w * 0.036))) : 4;
   const out: string[] = [];

@@ -118,6 +118,12 @@ interface UiState {
   readonly team: TeamUiState | undefined;
   /** The 3D scene currently taking mouse input (drag to orbit). */
   readonly orbiting: string | undefined;
+  /** The template library is open. */
+  readonly galleryOpen: boolean;
+  setGalleryOpen(open: boolean): void;
+  /** The slide or chart open in the Studio editor. */
+  readonly studio: string | undefined;
+  setStudio(id: string | undefined): void;
   /** Charts and slides playing their build-in animation, by id → when it started. */
   readonly reveals: Readonly<Record<string, number>>;
   reveal(ids: readonly string[], delay?: number): void;
@@ -203,6 +209,10 @@ export const useUiStore = create<UiState>()((set) => ({
   crowd: false,
   team: undefined,
   orbiting: undefined,
+  galleryOpen: false,
+  setGalleryOpen: (galleryOpen) => set({ galleryOpen }),
+  studio: undefined,
+  setStudio: (studio) => set({ studio }),
   reveals: {},
   reveal: (ids, delay = 0) => {
     const at = Date.now() + delay;

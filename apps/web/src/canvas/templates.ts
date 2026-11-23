@@ -1,16 +1,13 @@
-import type { ShapeProps } from "@canvas/doc";
+import { card, chart, columns, frame, INK, NOTE_COLORS, note, arrow, slide, text, type TemplateShape } from "./template-kit";
+import { LIBRARY, TEMPLATE_CATEGORIES, type TemplateCategory } from "./template-library";
+
+export { INK, NOTE_COLORS, TEMPLATE_CATEGORIES, type TemplateCategory, type TemplateShape };
 
 /**
  * Starter boards. Shapes reference each other by `key` (arrows' from/to); the editor gives
  * every shape a fresh id when it inserts a template, so one board can hold several copies.
- * Each one is a finished example worth keeping, not an empty skeleton: real content,
- * designed slides, charts and 3D where they fit.
+ * Each one is a finished example worth keeping, not an empty skeleton.
  */
-export interface TemplateShape {
-  readonly key: string;
-  readonly props: ShapeProps;
-}
-
 export interface Template {
   readonly id: TemplateId;
   readonly name: string;
@@ -19,65 +16,11 @@ export interface Template {
   readonly color: number;
   /** Shown as a badge on the card ("Slides", "Charts", "3D"). */
   readonly tag?: string;
+  readonly category: TemplateCategory;
   build(): TemplateShape[];
 }
 
-export type TemplateId = "pitch" | "dashboard" | "roadmap" | "explainer3d" | "kanban" | "retro" | "flowchart" | "mindmap" | "brainstorm";
-
-export const NOTE_COLORS = {
-  yellow: 0xffd666,
-  pink: 0xffadc8,
-  green: 0xa8e6b4,
-  blue: 0xa9cdff,
-  purple: 0xcdb8ff,
-  orange: 0xffc49b,
-} as const;
-
-export const INK = 0x111318;
-
-const note = (key: string, x: number, y: number, label: string, fill: number = NOTE_COLORS.yellow, w = 280, h = 84): TemplateShape => ({
-  key,
-  props: { kind: "rect", x, y, w, h, fill, label },
-});
-
-const frame = (key: string, x: number, y: number, w: number, h: number, label: string, fill: number): TemplateShape => ({
-  key,
-  props: { kind: "frame", x, y, w, h, fill, label },
-});
-
-const arrow = (key: string, from: string, to: string, label?: string): TemplateShape => ({
-  key,
-  props: { kind: "arrow", x: 0, y: 0, w: 1, h: 1, fill: INK, points: "0,0 1,1", from, to, ...(label ? { label } : {}) },
-});
-
-const text = (key: string, x: number, y: number, w: number, h: number, label: string): TemplateShape => ({ key, props: { kind: "text", x, y, w, h, fill: INK, label } });
-
-/** A task card like the AI's rich plans: title, detail, then owner · due · priority. */
-const card = (key: string, x: number, y: number, w: number, title: string, detail: string, owner: string, due: string, priority: "high" | "medium" | "low", fill: number): TemplateShape => {
-  const dot = priority === "high" ? "🔴" : priority === "medium" ? "🟠" : "🟢";
-  return note(key, x, y, `${title}\n\n${detail}\n\n👤 ${owner} · 📅 ${due} · ${dot} ${priority}`, fill, w, 168);
-};
-
-const slide = (key: string, x: number, y: number, data: Record<string, unknown>, title: string): TemplateShape[] => [
-  frame(`${key}-f`, x, y, 960, 540, title, 0x2f63ff),
-  { key, props: { kind: "slide", x, y, w: 960, h: 540, fill: INK, label: title, data: JSON.stringify(data) } },
-];
-
-const chart = (key: string, x: number, y: number, w: number, h: number, data: Record<string, unknown>): TemplateShape => ({
-  key,
-  props: { kind: "chart", x, y, w, h, fill: 0x2f63ff, label: typeof data.title === "string" ? data.title : "Chart", data: JSON.stringify(data) },
-});
-
-function columns(titles: ReadonlyArray<{ title: string; fill: number; notes: readonly string[]; noteFill: number }>, width = 320): TemplateShape[] {
-  const out: TemplateShape[] = [];
-  titles.forEach((column, c) => {
-    const x = c * (width + 40);
-    const height = Math.max(520, 40 + column.notes.length * 104 + 80);
-    out.push(frame(`col${c}`, x, 0, width, height, column.title, column.fill));
-    column.notes.forEach((t, i) => out.push(note(`n${c}-${i}`, x + 20, 24 + i * 104, t, column.noteFill, width - 40)));
-  });
-  return out;
-}
+export type TemplateId = string;
 
 // --- content ----------------------------------------------------------------------------
 
@@ -112,9 +55,10 @@ const PITCH: ReadonlyArray<Record<string, unknown>> = [
   { layout: "closing", kicker: "The ask", title: "Raising $12M to make every team data-fluent", subtitle: "24 months of runway to reach $15M ARR and launch Nova Agents.", items: [{ icon: "📅", title: "Book a live demo" }, { icon: "✉️", title: "founders@nova.ai" }] },
 ];
 
-export const TEMPLATES: readonly Template[] = [
+const CORE: readonly Template[] = [
   {
     id: "pitch",
+    category: "Presentations",
     name: "Pitch deck",
     blurb: "An 8-slide investor deck with charts and stats. Press Present to play it.",
     color: 0x5b8cff,
@@ -123,6 +67,7 @@ export const TEMPLATES: readonly Template[] = [
   },
   {
     id: "dashboard",
+    category: "Dashboards",
     name: "Metrics dashboard",
     blurb: "Revenue, channels, funnel and top products, with KPIs and insights.",
     color: 0x22c3a6,
@@ -157,6 +102,7 @@ export const TEMPLATES: readonly Template[] = [
   },
   {
     id: "roadmap",
+    category: "Planning",
     name: "Product roadmap",
     blurb: "A designed timeline plus quarter columns with owners, dates and priorities.",
     color: 0xff7a59,
@@ -184,6 +130,7 @@ export const TEMPLATES: readonly Template[] = [
   },
   {
     id: "explainer3d",
+    category: "3D",
     name: "3D explainer",
     blurb: "An interactive 3D solar system with fact cards. Double-click to explore.",
     color: 0x8b6cff,
@@ -219,6 +166,7 @@ export const TEMPLATES: readonly Template[] = [
   },
   {
     id: "kanban",
+    category: "Planning",
     name: "Kanban board",
     blurb: "Sprint board with owners, due dates and priorities on every card.",
     color: 0x2f63ff,
@@ -241,6 +189,7 @@ export const TEMPLATES: readonly Template[] = [
   },
   {
     id: "retro",
+    category: "Workshops",
     name: "Team retro",
     blurb: "What went well, what to improve, ideas, and who does what next.",
     color: 0x1e8f5a,
@@ -257,6 +206,7 @@ export const TEMPLATES: readonly Template[] = [
   },
   {
     id: "flowchart",
+    category: "Diagrams",
     name: "Flowchart",
     blurb: "A sign-up flow with decisions and retries. Arrows follow when you move things.",
     color: 0x7b55e7,
@@ -284,6 +234,7 @@ export const TEMPLATES: readonly Template[] = [
   },
   {
     id: "mindmap",
+    category: "Diagrams",
     name: "Mind map",
     blurb: "A product launch, mapped two levels deep.",
     color: 0xdd4f78,
@@ -318,6 +269,7 @@ export const TEMPLATES: readonly Template[] = [
   },
   {
     id: "brainstorm",
+    category: "Workshops",
     name: "Brainstorm",
     blurb: "A frame full of ideas to get the team going.",
     color: 0xc98a12,
@@ -334,5 +286,7 @@ export const TEMPLATES: readonly Template[] = [
     },
   },
 ];
+
+export const TEMPLATES: readonly Template[] = [...CORE, ...LIBRARY];
 
 export const templateById = (id: string | null | undefined): Template | undefined => TEMPLATES.find((t) => t.id === id);

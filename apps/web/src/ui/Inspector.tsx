@@ -166,6 +166,15 @@ function DesignTab({ editor }: { editor: Editor }) {
         </Section>
       )}
 
+      {one && (one.kind === "slide" || one.kind === "chart") && (
+        <section className="border-b border-edge px-3 py-3">
+          <button type="button" onClick={() => useUiStore.getState().setStudio(one.id)} className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#5b8cff] to-[#b36bff] text-[13px] font-bold text-white shadow-[0_8px_24px_rgba(91,140,255,0.35)] transition-transform hover:-translate-y-0.5">
+            <Icon name="sparkle" className="h-4 w-4" /> Edit in Studio
+          </button>
+          <p className="mt-1.5 text-center text-[11px] text-muted">or double-click it on the board</p>
+        </section>
+      )}
+
       {chart && one && (
         <Section title="Chart">
           <div className="grid grid-cols-3 gap-1.5">

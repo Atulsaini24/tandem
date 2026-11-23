@@ -58,6 +58,7 @@ function commands(editor: Editor, close: () => void): Command[] {
     tool("text", "Text", "text", "T"),
     tool("frame", "Frame", "frame", "F"),
     tool("comment", "Comment", "comment", "C"),
+    { id: "tpl-gallery", label: `Browse all ${TEMPLATES.length} templates…`, group: "Templates", icon: "plus" as const, edits: true, run: () => useUiStore.getState().setGalleryOpen(true) },
     ...TEMPLATES.map((t) => ({ id: `tpl-${t.id}`, label: `Insert template: ${t.name}`, group: "Templates", icon: "plus" as const, edits: true, run: () => editor.insertTemplate(t.id) })),
     { id: "ai", label: "Ask the AI…", group: "AI", icon: "sparkle", edits: true, run: () => ui.setAiOpen(true) },
     { id: "undo", label: "Undo", group: "Edit", icon: "undo", keys: `${MOD}Z`, edits: true, run: () => editor.undo() },

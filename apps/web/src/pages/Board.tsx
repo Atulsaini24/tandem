@@ -17,6 +17,8 @@ import { RitualsPanel, TimerPill } from "../ui/Rituals";
 import { Reveal } from "../ui/Reveal";
 import { Scenes3D } from "../ui/Scenes3D";
 import { ShareDialog } from "../ui/ShareDialog";
+import { Studio } from "../ui/Studio";
+import { TemplateGallery } from "../ui/TemplateGallery";
 import { TeamBar } from "../ui/TeamBar";
 import { Toolbar } from "../ui/Toolbar";
 import { TopBar } from "../ui/TopBar";
@@ -47,6 +49,7 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
   const { docId, token, viewMode, template } = route;
   const presenting = useUiStore((s) => s.presenting !== undefined);
   const aiOpen = useUiStore((s) => s.aiOpen);
+  const galleryOpen = useUiStore((s) => s.galleryOpen);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -139,6 +142,15 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
       <PresentMode editor={editor} />
       <RadialMenu editor={editor} />
       <CommandPalette editor={editor} />
+      <Studio editor={editor} />
+      <TemplateGallery
+        open={galleryOpen}
+        onClose={() => useUiStore.getState().setGalleryOpen(false)}
+        onPick={(id) => {
+          useUiStore.getState().setGalleryOpen(false);
+          editor?.insertTemplate(id, editor.freeSpotCenter(1800, 1100));
+        }}
+      />
       <ShareDialog editor={editor} open={shareOpen} onClose={() => setShareOpen(false)} />
       <Tour ready={editor !== null} />
     </div>

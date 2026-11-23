@@ -7,16 +7,38 @@
 import { chartSvg, parseChart, type ChartSpec, type ChartTheme } from "./charts";
 import { anim, deltaTone, fitSize, FONT, mix, n1, textLines, textWidth, wrapText } from "./svg-kit";
 
-export type SlideLayout = "title" | "agenda" | "cards" | "stats" | "chart" | "quote" | "timeline" | "compare" | "closing";
-export type SlideThemeName = "midnight" | "aurora" | "sunset" | "paper" | "ocean" | "noir";
+export type SlideLayout =
+  | "title" | "agenda" | "cards" | "stats" | "chart" | "quote" | "timeline" | "compare" | "closing"
+  | "statement" | "team" | "pricing" | "process" | "matrix";
+export type SlideThemeName = "midnight" | "aurora" | "sunset" | "paper" | "ocean" | "noir" | "neon" | "forest" | "royal" | "mono";
 
-export const SLIDE_LAYOUTS: readonly SlideLayout[] = ["title", "agenda", "cards", "stats", "chart", "quote", "timeline", "compare", "closing"];
-export const SLIDE_THEMES: readonly SlideThemeName[] = ["midnight", "aurora", "sunset", "paper", "ocean", "noir"];
+export const SLIDE_LAYOUTS: readonly SlideLayout[] = ["title", "agenda", "cards", "stats", "chart", "quote", "timeline", "compare", "closing", "statement", "team", "pricing", "process", "matrix"];
+export const SLIDE_THEMES: readonly SlideThemeName[] = ["midnight", "aurora", "sunset", "paper", "ocean", "noir", "neon", "forest", "royal", "mono"];
+
+/** What each layout shows, for pickers. */
+export const LAYOUT_INFO: Record<SlideLayout, { readonly name: string; readonly hint: string }> = {
+  title: { name: "Title", hint: "Opening slide with art" },
+  agenda: { name: "Agenda", hint: "Numbered sections" },
+  cards: { name: "Cards", hint: "3–6 points with icons" },
+  stats: { name: "Big numbers", hint: "1–4 headline stats" },
+  chart: { name: "Chart", hint: "Chart plus findings" },
+  quote: { name: "Quote", hint: "Testimonial" },
+  timeline: { name: "Timeline", hint: "Phases in order" },
+  compare: { name: "Compare", hint: "Old way vs new way" },
+  closing: { name: "Closing", hint: "The ask + buttons" },
+  statement: { name: "Statement", hint: "One bold idea, *highlighted*" },
+  team: { name: "Team", hint: "People and roles" },
+  pricing: { name: "Pricing", hint: "Plans with features" },
+  process: { name: "Process", hint: "Steps as arrows" },
+  matrix: { name: "2×2 matrix", hint: "Four quadrants" },
+};
 
 export interface SlideItem {
   readonly icon: string;
   readonly title: string;
   readonly text: string;
+  /** A price, metric or date shown big (pricing, process). */
+  readonly value: string;
 }
 
 export interface SlideStat {
@@ -36,6 +58,10 @@ export interface SlideSpec {
   readonly chart?: ChartSpec;
   readonly quote: { readonly text: string; readonly author: string };
   readonly columns: ReadonlyArray<{ readonly title: string; readonly items: readonly string[] }>;
+  /** Matrix: the horizontal and vertical axis labels. */
+  readonly axes: readonly [string, string];
+  /** Still being written by the AI: drawn as a placeholder. */
+  readonly pending: boolean;
   /** Footer: deck name and position. */
   readonly deck: string;
   readonly index: number;
@@ -61,6 +87,10 @@ export const THEMES: Record<SlideThemeName, SlideTheme> = {
   paper: { bg1: "#fbfaf7", bg2: "#e9eef8", ink: "#111318", muted: "#666b76", accent: "#2f63ff", accent2: "#00b3a4", panel: "#ffffff", grid: "#e1e5ee", dark: false },
   ocean: { bg1: "#021627", bg2: "#063a63", ink: "#eef8ff", muted: "#95bad6", accent: "#36c6ff", accent2: "#5ef0c8", panel: "#0a3558", grid: "#194b74", dark: true },
   noir: { bg1: "#0b0b0d", bg2: "#1d1c22", ink: "#f6f5f2", muted: "#a3a2a8", accent: "#ffcf5c", accent2: "#ff7a59", panel: "#1e1e24", grid: "#303038", dark: true },
+  neon: { bg1: "#05010d", bg2: "#1a0630", ink: "#fbf4ff", muted: "#b8a3d1", accent: "#ff2fd6", accent2: "#22e5ff", panel: "#1c0a33", grid: "#3a1a5e", dark: true },
+  forest: { bg1: "#06140c", bg2: "#123222", ink: "#effff3", muted: "#9fc4ac", accent: "#9be15d", accent2: "#00c2a8", panel: "#113222", grid: "#24503a", dark: true },
+  royal: { bg1: "#120a24", bg2: "#2b1650", ink: "#fbf7ff", muted: "#b9a9d6", accent: "#f5c451", accent2: "#c87bff", panel: "#24133f", grid: "#3e2a66", dark: true },
+  mono: { bg1: "#ffffff", bg2: "#f1f1ef", ink: "#0d0d0d", muted: "#6b6b6b", accent: "#0d0d0d", accent2: "#5b5b5b", panel: "#ffffff", grid: "#e4e4e1", dark: false },
 };
 
 const clean = (v: unknown, max: number): string =>
@@ -94,15 +124,16 @@ export function parseSlide(data: string | undefined): SlideSpec | undefined {
   }
   if (typeof raw !== "object" || raw === null) return undefined;
   const r = raw as Record<string, unknown>;
-  const title = clean(r.title, 120);
-  if (!title) return undefined;
+  const rawTitle = clean(r.title, 140);
+  const title = r.layout === "statement" ? rawTitle : rawTitle.replace(/\*/g, "");
+  if (!title.replace(/\*/g, "")) return undefined;
   const items: SlideItem[] = (Array.isArray(r.items) ? r.items : []).slice(0, 6).flatMap((x): SlideItem[] => {
-    if (typeof x === "string") return [{ icon: "", title: clean(x, 80), text: "" }];
+    if (typeof x === "string") return [{ icon: "", title: clean(x, 80), text: "", value: "" }];
     if (typeof x !== "object" || x === null) return [];
     const o = x as Record<string, unknown>;
     const t = clean(o.title, 80);
-    const text = clean(o.text, 220);
-    return t || text ? [{ icon: icon(o.icon), title: t, text }] : [];
+    const text = clean(o.text, 260);
+    return t || text ? [{ icon: icon(o.icon), title: t, text, value: clean(typeof o.value === "number" ? String(o.value) : o.value, 16) }] : [];
   });
   const stats = (Array.isArray(r.stats) ? r.stats : []).slice(0, 4).flatMap((x): SlideStat[] => {
     if (typeof x !== "object" || x === null) return [];
@@ -121,16 +152,19 @@ export function parseSlide(data: string | undefined): SlideSpec | undefined {
   const chart = r.chart && typeof r.chart === "object" ? parseChart(JSON.stringify(r.chart)) : undefined;
   // Models sometimes put a chart slide's findings under "columns": use them.
   if (r.layout === "chart" && items.length === 0) {
-    for (const t of columns[0]?.items ?? []) items.push({ icon: "", title: "", text: t });
+    for (const t of columns[0]?.items ?? []) items.push({ icon: "", title: "", text: t, value: "" });
   }
   let layout = SLIDE_LAYOUTS.includes(r.layout as SlideLayout) ? (r.layout as SlideLayout) : "cards";
+  // When a layout's content is missing, a later slide falls back to a bold statement (a
+  // second title slide mid-deck looks like a mistake).
+  const bare: SlideLayout = typeof r.index === "number" && r.index > 0 ? "statement" : "title";
   // A layout without its content falls back to one that has something to show.
-  if (layout === "chart" && !chart) layout = items.length ? "cards" : "title";
-  if (layout === "stats" && stats.length === 0) layout = items.length ? "cards" : "title";
-  if (layout === "compare" && columns.length < 2) layout = items.length ? "cards" : "title";
-  if ((layout === "cards" || layout === "agenda" || layout === "timeline") && items.length === 0) layout = stats.length ? "stats" : "title";
+  if (layout === "chart" && !chart) layout = items.length ? "cards" : bare;
+  if (layout === "stats" && stats.length === 0) layout = items.length ? "cards" : bare;
+  if (layout === "compare" && columns.length < 2) layout = items.length ? "cards" : bare;
+  if ((layout === "cards" || layout === "agenda" || layout === "timeline" || layout === "team" || layout === "pricing" || layout === "process" || layout === "matrix") && items.length === 0) layout = stats.length ? "stats" : bare;
   const quoteText = clean(q.text, 240) || (layout === "quote" ? clean(r.subtitle, 240) : "");
-  if (layout === "quote" && !quoteText) layout = "title";
+  if (layout === "quote" && !quoteText) layout = bare;
   const theme = SLIDE_THEMES.includes(r.theme as SlideThemeName) ? (r.theme as SlideThemeName) : hashTheme(clean(r.deck, 80) || title);
   const num = (v: unknown, d: number): number => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(99, Math.round(v))) : d);
   return {
@@ -144,6 +178,8 @@ export function parseSlide(data: string | undefined): SlideSpec | undefined {
     ...(chart ? { chart } : {}),
     quote: { text: quoteText, author: clean(q.author, 60) },
     columns,
+    axes: [clean(Array.isArray(r.axes) ? r.axes[0] : "", 40), clean(Array.isArray(r.axes) ? r.axes[1] : "", 40)],
+    pending: r.pending === true,
     deck: clean(r.deck, 80),
     index: num(r.index, 0),
     total: num(r.total, 0),
@@ -171,16 +207,24 @@ export function slideSvg(spec: SlideSpec, w: number, h: number): string {
   // Soft light blobs; where they sit depends on the layout so a deck doesn't look stamped.
   const glow = (spec.index * 137) % 360;
   const gx = spec.layout === "title" || spec.layout === "closing" ? 760 : 860 + Math.cos(glow) * 40;
-  out.push(`<circle cx="${n1(gx)}" cy="${n1(spec.layout === "title" ? 250 : 40)}" r="${spec.layout === "title" ? 380 : 300}" fill="url(#${P}g1)" ${anim("a-glow", 0)}/>`);
-  out.push(`<circle cx="${n1(60 + Math.sin(glow) * 30)}" cy="560" r="300" fill="url(#${P}g2)" ${anim("a-glow", 200)}/>`);
+  out.push(`<g class="a-drift"><circle cx="${n1(gx)}" cy="${n1(spec.layout === "title" ? 250 : 40)}" r="${spec.layout === "title" ? 380 : 300}" fill="url(#${P}g1)" ${anim("a-glow", 0)}/></g>`);
+  out.push(`<g class="a-drift2"><circle cx="${n1(60 + Math.sin(glow) * 30)}" cy="560" r="300" fill="url(#${P}g2)" ${anim("a-glow", 200)}/></g>`);
 
   const ctx: SCtx = { spec, t, P, out, defs };
+  if (spec.pending) {
+    drawPending(ctx);
+    footer(ctx);
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${n1(w)}" height="${n1(h)}" viewBox="0 0 ${SLIDE_W} ${SLIDE_H}" preserveAspectRatio="xMidYMid slice" font-family="${FONT}"><defs>${defs.join("")}</defs>${out.join("")}</svg>`;
+  }
   switch (spec.layout) {
     case "title":
       drawTitle(ctx);
       break;
     case "closing":
       drawClosing(ctx);
+      break;
+    case "statement":
+      drawStatement(ctx);
       break;
     default:
       header(ctx);
@@ -190,6 +234,10 @@ export function slideSvg(spec: SlideSpec, w: number, h: number): string {
       else if (spec.layout === "chart") drawChart(ctx);
       else if (spec.layout === "quote") drawQuote(ctx);
       else if (spec.layout === "timeline") drawTimeline(ctx);
+      else if (spec.layout === "team") drawTeam(ctx);
+      else if (spec.layout === "pricing") drawPricing(ctx);
+      else if (spec.layout === "process") drawProcess(ctx);
+      else if (spec.layout === "matrix") drawMatrix(ctx);
       else drawCompare(ctx);
   }
   footer(ctx);
@@ -264,6 +312,7 @@ function drawTitle(ctx: SCtx): void {
   const cx = 735;
   const cy = 270;
   defs(ctx, `<radialGradient id="${P}orb" cx="0.35" cy="0.3" r="0.8"><stop offset="0" stop-color="${mix(t.accent, "#ffffff", 0.55)}"/><stop offset="0.45" stop-color="${t.accent}"/><stop offset="1" stop-color="${t.accent2}"/></radialGradient>`);
+  out.push(`<g class="a-orbit" style="transform-origin:${cx}px ${cy}px">`);
   [190, 140, 92].forEach((r, i) => out.push(`<ellipse cx="${cx}" cy="${cy}" rx="${r}" ry="${r * 0.42}" fill="none" stroke="${i === 1 ? `url(#${P}ac)` : t.ink}" stroke-opacity="${i === 1 ? 0.9 : 0.14}" stroke-width="${i === 1 ? 2 : 1.2}" transform="rotate(-18 ${cx} ${cy})"/>`));
   out.push(`<circle cx="${cx}" cy="${cy}" r="64" fill="url(#${P}orb)" ${anim("a-pop", 300)}/>`);
   out.push(`<circle cx="${cx - 22}" cy="${cy - 24}" r="18" fill="#ffffff" fill-opacity="0.25" ${anim("a-pop", 420)}/>`);
@@ -273,6 +322,7 @@ function drawTitle(ctx: SCtx): void {
     [cx + 60, cy + 66, 5, t.ink],
   ];
   sats.forEach(([x, y, r, c], i) => out.push(`<circle cx="${x}" cy="${y}" r="${r}" fill="${c}" ${anim("a-pop", 600 + i * 120)}/>`));
+  out.push(`</g>`);
 
   kickerPill(ctx, PAD, 150, 0);
   const width = 520;
@@ -391,6 +441,16 @@ function drawCards(ctx: SCtx): void {
 function drawStats(ctx: SCtx): void {
   const { spec, t, P, out } = ctx;
   const stats = spec.stats;
+  const hero = stats[0];
+  if (stats.length === 1 && hero) {
+    const size = fitSize(hero.value, 700, 170, 60, 800, 1);
+    out.push(textLines([hero.value], PAD - 6, contentTop + size * 0.82 + 6, { size, fill: `url(#${P}acv)`, weight: 800, letterSpacing: -6, cls: "a-pop", delay: 200 }));
+    const y = contentTop + size * 0.82 + 54;
+    out.push(textLines(wrapText(hero.label, 620, 22, 600, 2), PAD, y, { size: 22, fill: t.ink, weight: 600, lineHeight: 28, cls: "a-up", delay: 420 }));
+    if (hero.delta) out.push(textLines([hero.delta], SLIDE_W - PAD, contentTop + 40, { size: 20, fill: deltaTone(hero.delta) === "down" ? (t.dark ? "#ff6b61" : "#d6453d") : t.dark ? "#3ddc8b" : "#13915a", weight: 800, anchor: "end", cls: "a-pop", delay: 600 }));
+    if (spec.subtitle) out.push(textLines(wrapText(spec.subtitle, 760, 16, 400, 2), PAD, y + 62, { size: 16, fill: t.muted, lineHeight: 22, cls: "a-up", delay: 560 }));
+    return;
+  }
   const n = stats.length;
   const gap = 20;
   const cw = (SLIDE_W - PAD * 2 - gap * (n - 1)) / n;
@@ -521,3 +581,209 @@ function drawCompare(ctx: SCtx): void {
 export function slideData(spec: Partial<Omit<SlideSpec, "chart">> & { title: string; chart?: unknown }): string {
   return JSON.stringify(spec);
 }
+
+/** One giant idea; words wrapped in *asterisks* get the accent gradient. */
+function drawStatement(ctx: SCtx): void {
+  const { spec, t, P, out } = ctx;
+  const words: Array<{ w: string; hi: boolean }> = [];
+  let hi = false;
+  for (const token of spec.title.split(/\s+/).filter(Boolean)) {
+    const starts = token.startsWith("*");
+    const ends = token.endsWith("*") && token.length > 1;
+    if (starts) hi = true;
+    words.push({ w: token.replace(/\*/g, ""), hi });
+    if (ends || (starts && token.length > 1 && token.endsWith("*"))) hi = false;
+  }
+  const plain = words.map((x) => x.w).join(" ");
+  const maxW = SLIDE_W - PAD * 2 - 40;
+  const size = fitSize(plain, maxW, 68, 34, 800, 3);
+  // Wrap by words, keeping each word's highlight.
+  const lines: Array<typeof words> = [];
+  let line: typeof words = [];
+  for (const word of words) {
+    const next = [...line, word].map((x) => x.w).join(" ");
+    if (line.length > 0 && textWidth(next, size, 800) > maxW) {
+      lines.push(line);
+      line = [word];
+    } else line.push(word);
+  }
+  if (line.length > 0) lines.push(line);
+  const lh = size * 1.08;
+  const top = SLIDE_H / 2 - ((lines.length - 1) * lh) / 2 - (spec.subtitle ? 26 : 0);
+  if (spec.kicker) out.push(textLines([spec.kicker.toUpperCase()], SLIDE_W / 2, top - size - 6, { size: 13, fill: t.accent, weight: 800, anchor: "middle", letterSpacing: 2.6, cls: "a-up", delay: 0 }));
+  lines.slice(0, 3).forEach((ws, i) => {
+    const spans = ws.map((x, k) => `<tspan${x.hi ? ` fill="url(#${P}ac)"` : ""}>${(k ? " " : "") + x.w.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</tspan>`).join("");
+    out.push(`<text x="${SLIDE_W / 2}" y="${n1(top + i * lh + size * 0.35)}" text-anchor="middle" font-family="${FONT}" font-size="${n1(size)}" font-weight="800" letter-spacing="-1.6" fill="${t.ink}" ${anim("a-up", 120 + i * 140)}>${spans}</text>`);
+  });
+  if (spec.subtitle) out.push(textLines(wrapText(spec.subtitle, 680, 18, 400, 2), SLIDE_W / 2, top + (Math.min(3, lines.length) - 1) * lh + size * 0.35 + 54, { size: 18, fill: t.muted, anchor: "middle", lineHeight: 26, cls: "a-up", delay: 520 }));
+}
+
+const initials = (name: string): string =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+
+function drawTeam(ctx: SCtx): void {
+  const { spec, t, P, out } = ctx;
+  const people = spec.items.slice(0, 6);
+  const n = people.length;
+  const cols = n <= 4 ? n : 3;
+  const rows = Math.ceil(n / cols);
+  const cw = (SLIDE_W - PAD * 2) / cols;
+  const rh = Math.min(200, (SLIDE_H - contentTop - 60) / rows);
+  people.forEach((p, i) => {
+    const cx = PAD + (i % cols) * cw + cw / 2;
+    const y = contentTop + Math.floor(i / cols) * rh;
+    const r = rows > 1 ? 34 : 48;
+    const parts = [
+      `<circle cx="${n1(cx)}" cy="${n1(y + r + 4)}" r="${r + 5}" fill="none" stroke="url(#${P}ac)" stroke-width="2"/>`,
+      `<circle cx="${n1(cx)}" cy="${n1(y + r + 4)}" r="${r}" fill="url(#${P}acv)"/>`,
+      textLines([p.icon || initials(p.title) || "•"], cx, y + r + 4 + (p.icon ? r * 0.36 : r * 0.3), { size: p.icon ? r * 0.95 : r * 0.78, fill: "#ffffff", weight: 800, anchor: "middle" }),
+      textLines(wrapText(p.title, cw - 24, 17, 700, 1), cx, y + r * 2 + 34, { size: 17, fill: t.ink, weight: 700, anchor: "middle" }),
+    ];
+    if (p.value) parts.push(textLines([p.value.toUpperCase()], cx, y + r * 2 + 54, { size: 11, fill: t.accent, weight: 800, anchor: "middle", letterSpacing: 1.4 }));
+    if (p.text) parts.push(textLines(wrapText(p.text, cw - 30, 12.5, 400, rows > 1 ? 2 : 3), cx, y + r * 2 + (p.value ? 74 : 56), { size: 12.5, fill: t.muted, anchor: "middle", lineHeight: 17 }));
+    out.push(`<g ${anim("a-pop", 200 + i * 110)}>${parts.join("")}</g>`);
+  });
+}
+
+function drawPricing(ctx: SCtx): void {
+  const { spec, t, P, out } = ctx;
+  const plans = spec.items.slice(0, 4);
+  const n = plans.length;
+  const gap = 18;
+  const cw = (SLIDE_W - PAD * 2 - gap * (n - 1)) / n;
+  const best = n >= 3 ? 1 : n - 1;
+  plans.forEach((plan, i) => {
+    const pop = i === best;
+    const x = PAD + i * (cw + gap);
+    const y = contentTop + (pop ? -8 : 6);
+    const h = SLIDE_H - contentTop - (pop ? 50 : 64);
+    const parts = [panel(ctx, x, y, cw, h, pop)];
+    if (pop) {
+      parts.push(`<rect x="${n1(x)}" y="${n1(y)}" width="${n1(cw)}" height="5" rx="2.5" fill="url(#${P}ac)"/>`);
+      const label = "MOST POPULAR";
+      const lw = textWidth(label, 10, 800) * 1.15 + 20;
+      parts.push(`<rect x="${n1(x + cw - lw - 14)}" y="${n1(y + 16)}" width="${n1(lw)}" height="20" rx="10" fill="url(#${P}ac)"/>`);
+      parts.push(textLines([label], x + cw - 14 - lw / 2, y + 29.5, { size: 10, fill: "#ffffff", weight: 800, anchor: "middle", letterSpacing: 1 }));
+    }
+    parts.push(textLines(wrapText(`${plan.icon ? `${plan.icon} ` : ""}${plan.title}`, cw - 40, 16, 700, 1), x + 22, y + 32, { size: 16, fill: t.ink, weight: 700 }));
+    const price = plan.value || "—";
+    const ps = fitSize(price, cw - 44, 40, 20, 800, 1);
+    parts.push(textLines([price], x + 22, y + 46 + ps * 0.9, { size: ps, fill: pop ? `url(#${P}acv)` : t.ink, weight: 800, letterSpacing: -1 }));
+    const features = plan.text.split(/[;•\n]|,\s(?=[A-Z0-9₹$])/).map((f) => f.trim()).filter(Boolean).slice(0, 6);
+    let fy = y + 46 + ps + 34;
+    for (const f of features) {
+      if (fy > y + h - 20) break;
+      const lines = wrapText(f, cw - 66, 13, 500, 2);
+      parts.push(`<circle cx="${n1(x + 31)}" cy="${n1(fy - 4)}" r="8" fill="${t.accent}" fill-opacity="0.18"/><path d="M${n1(x + 27.5)},${n1(fy - 4)} l2.5,2.5 l4.5,-5" fill="none" stroke="${t.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`);
+      parts.push(textLines(lines, x + 46, fy, { size: 13, fill: t.ink, weight: 500, lineHeight: 17 }));
+      fy += lines.length * 17 + 12;
+    }
+    out.push(`<g ${anim("a-up", 200 + i * 130)}>${parts.join("")}</g>`);
+  });
+}
+
+function drawProcess(ctx: SCtx): void {
+  const { spec, t, P, out } = ctx;
+  const steps = spec.items.slice(0, 6);
+  const n = steps.length;
+  const gap = 8;
+  const cw = (SLIDE_W - PAD * 2 - gap * (n - 1)) / n;
+  const y = contentTop + 6;
+  const ah = 74;
+  const tip = 22;
+  steps.forEach((st, i) => {
+    const x = PAD + i * (cw + gap);
+    const first = i === 0;
+    const last = i === n - 1;
+    const pts = [
+      [x, y],
+      [x + cw - (last ? 0 : tip), y],
+      [x + cw + (last ? 0 : 0), y + ah / 2],
+      [x + cw - (last ? 0 : tip), y + ah],
+      [x, y + ah],
+      [x + (first ? 0 : tip), y + ah / 2],
+    ];
+    if (last) {
+      pts[1] = [x + cw, y];
+      pts[2] = [x + cw, y + ah / 2];
+      pts[3] = [x + cw, y + ah];
+    }
+    const k = n > 1 ? i / (n - 1) : 0;
+    const fill = mix(t.accent, t.accent2, k);
+    const parts = [
+      `<polygon points="${pts.map(([a, b]) => `${n1(a ?? 0)},${n1(b ?? 0)}`).join(" ")}" fill="${fill}" fill-opacity="${t.dark ? 0.9 : 0.95}"/>`,
+      textLines([st.icon || String(i + 1).padStart(2, "0")], x + (first ? 16 : tip + 8), y + ah / 2 + 8, { size: st.icon ? 22 : 20, fill: "#ffffff", weight: 800 }),
+      textLines(wrapText(st.value || `Step ${i + 1}`, cw - 70, 11, 800, 1), x + (first ? 16 : tip + 8) + 40, y + ah / 2 + 4, { size: 11, fill: "#ffffff", weight: 800, letterSpacing: 1, opacity: 0.9 }),
+      textLines(wrapText(st.title, cw - 12, 16, 700, 2), x + 6, y + ah + 34, { size: 16, fill: t.ink, weight: 700, lineHeight: 20 }),
+    ];
+    const tl = wrapText(st.title, cw - 12, 16, 700, 2).length;
+    if (st.text) parts.push(textLines(wrapText(st.text, cw - 12, 12.5, 400, 6), x + 6, y + ah + 34 + tl * 20 + 6, { size: 12.5, fill: t.muted, lineHeight: 17 }));
+    out.push(`<g ${anim("a-left", 200 + i * 140)}>${parts.join("")}</g>`);
+    void P;
+  });
+}
+
+function drawMatrix(ctx: SCtx): void {
+  const { spec, t, P, out } = ctx;
+  const quads = spec.items.slice(0, 4);
+  const x0 = PAD + 34;
+  const y0 = contentTop;
+  const w = SLIDE_W - PAD - x0;
+  const h = SLIDE_H - contentTop - 76;
+  const qw = w / 2;
+  const qh = h / 2;
+  // Axes.
+  out.push(`<line x1="${x0}" y1="${n1(y0 + h)}" x2="${n1(x0 + w)}" y2="${n1(y0 + h)}" stroke="${t.ink}" stroke-opacity="0.35" stroke-width="1.5"/>`);
+  out.push(`<line x1="${x0}" y1="${n1(y0 + h)}" x2="${x0}" y2="${n1(y0)}" stroke="${t.ink}" stroke-opacity="0.35" stroke-width="1.5"/>`);
+  const [ax, ay] = spec.axes;
+  if (ax) out.push(textLines([`${ax.toUpperCase()} →`], x0 + w, y0 + h + 22, { size: 11, fill: t.muted, weight: 800, anchor: "end", letterSpacing: 1.4 }));
+  if (ay) out.push(`<text transform="translate(${PAD + 12} ${n1(y0)}) rotate(-90)" text-anchor="end" font-family="${FONT}" font-size="11" font-weight="800" letter-spacing="1.4" fill="${t.muted}">${ay.toUpperCase().replace(/&/g, "&amp;").replace(/</g, "&lt;")} →</text>`);
+  // Top-right is the winner quadrant.
+  const order: Array<[number, number]> = [
+    [1, 0],
+    [0, 0],
+    [1, 1],
+    [0, 1],
+  ];
+  quads.forEach((q, i) => {
+    const [cx, cy] = order[i] ?? [0, 0];
+    const x = x0 + 8 + cx * qw;
+    const y = y0 + cy * qh;
+    const win = i === 0;
+    const parts = [
+      `<rect x="${n1(x)}" y="${n1(y)}" width="${n1(qw - 12)}" height="${n1(qh - 10)}" rx="16" fill="${win ? t.accent : t.panel}" fill-opacity="${win ? 0.16 : t.dark ? 0.55 : 0.9}" stroke="${win ? t.accent : t.grid}" stroke-opacity="${win ? 0.7 : 1}"/>`,
+      textLines([`${q.icon ? `${q.icon}  ` : ""}${q.title}`], x + 18, y + 32, { size: 17, fill: win ? (t.dark ? mix(t.accent, "#ffffff", 0.35) : t.accent) : t.ink, weight: 800 }),
+    ];
+    if (q.text) parts.push(textLines(wrapText(q.text, qw - 50, 13, 400, Math.max(1, Math.floor((qh - 60) / 18))), x + 18, y + 56, { size: 13, fill: t.muted, lineHeight: 18 }));
+    out.push(`<g ${anim("a-pop", 200 + i * 130)}>${parts.join("")}</g>`);
+    void P;
+  });
+}
+
+/** A slide the AI hasn't written yet: its title, what it will show, and skeleton blocks. */
+function drawPending(ctx: SCtx): void {
+  const { spec, t, P, out } = ctx;
+  header(ctx);
+  const y = contentTop;
+  const w = SLIDE_W - PAD * 2;
+  const blocks: Array<[number, number, number, number]> =
+    spec.layout === "stats" || spec.layout === "pricing" || spec.layout === "team"
+      ? [0, 1, 2].map((i) => [PAD + i * (w / 3), y, w / 3 - 18, 190] as [number, number, number, number])
+      : spec.layout === "chart"
+        ? [
+            [PAD, y, w * 0.6, 260],
+            [PAD + w * 0.64, y, w * 0.36, 120],
+          ]
+        : [0, 1, 2, 3].map((i) => [PAD + (i % 2) * (w / 2), y + Math.floor(i / 2) * 110, w / 2 - 18, 92] as [number, number, number, number]);
+  defs(ctx, `<linearGradient id="${P}sh" x1="0" x2="1"><stop offset="0" stop-color="${t.ink}" stop-opacity="0.04"/><stop offset="0.5" stop-color="${t.ink}" stop-opacity="0.12"/><stop offset="1" stop-color="${t.ink}" stop-opacity="0.04"/></linearGradient>`);
+  blocks.forEach(([x, by, bw, bh]) => {
+    out.push(`<rect x="${n1(x)}" y="${n1(by)}" width="${n1(bw)}" height="${n1(bh)}" rx="16" fill="url(#${P}sh)" class="a-shimmer"/>`);
+  });
+  out.push(textLines(["\u2726  Writing this slide\u2026"], SLIDE_W - PAD, SLIDE_H - 62, { size: 13, fill: t.accent, weight: 700, anchor: "end" }));
+}
+

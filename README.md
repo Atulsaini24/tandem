@@ -36,8 +36,10 @@ links, and an AI that runs on your own machine.
 | **Offline & history** | Works with no connection (edits queue on the device and merge later), selective undo (only your own edits), **time travel** slider with restore |
 | **Share & export** | Edit and view-only links (server-signed when auth is on), **PNG / SVG / PDF** export of the board or the selection |
 | **Layout** | Pro editor: header with Present/Share, left sidebar (**Pages**, **Layers** with search, **Templates**), right panel with **Design** (exact color, position, size, rotation, text, arrange) and **AI** |
-| **AI (local)** | **Designed slide decks** (6 themes, 9 layouts: title, agenda, cards, big numbers, chart, timeline, comparison, quote, closing) that play in Present mode and build in, **charts** with KPIs and an insight (bar, ranking, stacked, line, area, pie, donut, funnel, radar), **3D scenes** with ready-made models, real lighting and glow, composed so they always read well, **detailed plans**, **flowcharts and mind maps**, summaries; choose the local model in the panel (qwen3:4b by default) |
-| **Templates** | Finished examples, not skeletons: an 8-slide **pitch deck**, a **metrics dashboard** (4 charts), a **product roadmap**, a **3D explainer**, plus kanban, retro, flowchart, mind map and brainstorm |
+| **AI (local)** | **Designed slide decks** (10 themes, 14 layouts including statement, team, pricing, process and 2×2 matrix) that stream in slide by slide, play in Present mode, build in and keep moving on stage, **charts** with KPIs and an insight (bar, ranking, stacked, line, area, pie, donut, funnel, radar), **3D scenes** with ready-made models, real lighting and glow, composed so they always read well, **detailed plans**, **flowcharts and mind maps**, summaries; choose the local model in the panel (qwen3:4b by default) |
+| **Templates** | **48 finished templates in 8 categories** in a searchable gallery with live previews: 9 decks (pitch, QBR, launch, marketing, sales, sustainability, onboarding, case study, lesson), 6 dashboards, OKRs, Gantt, Eisenhower, sprint, SWOT, business model and lean canvas, journey map, persona, RACI, org chart, architecture, fishbone, decision tree, user flow, workshops, 3D scenes and study tools |
+| **Studio** | Double-click a slide or chart: live preview with animation, layout thumbnails, 10 themes (one slide or the whole deck), every field, a chart data grid with spreadsheet paste, sort and auto KPIs, 6 palettes, and AI rewrites ("make it punchier") |
+| **Insert** | Any of 14 slide layouts, 9 chart types or 6 3D scenes in one click, no AI needed |
 
 ## How it fits together
 
@@ -239,3 +241,10 @@ board read-only.
 Every non-obvious choice — what was picked, what was rejected, and why, including the bugs that
 changed the design — is in [`DECISIONS.md`](DECISIONS.md). Known gaps and next steps are in
 [`LATER.md`](LATER.md).
+
+## Demo video
+
+`node scripts/record-demo.mjs` records a 60-second demo (homepage, a deck in Present mode,
+two people merging offline edits) to `docs/tandem-demo.webm`, using your installed Chrome.
+Start the dev servers first (`pnpm dev`).
+

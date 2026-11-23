@@ -6,10 +6,11 @@ import { visualBounds } from "../canvas/geometry";
 import { TEMPLATES } from "../canvas/templates";
 import { CANVAS_THEMES, displayFill, hex } from "../canvas/theme";
 import { useUiStore } from "../state/ui-store";
+import { InsertPanel } from "./InsertPanel";
 import { Icon, spring, type IconName } from "./kit";
 import { useSceneVersion } from "./useScene";
 
-type Tab = "pages" | "layers" | "templates";
+type Tab = "pages" | "layers" | "insert" | "templates";
 
 const KIND_ICON: Record<ShapeView["kind"], IconName> = {
   rect: "rect",
@@ -69,9 +70,9 @@ export function LeftSidebar({ editor, open, onToggle }: { editor: Editor | null;
             transition={spring}
             className="pointer-events-auto absolute bottom-0 left-0 top-14 z-10 flex w-64 flex-col border-r border-edge bg-paper/90 backdrop-blur-xl"
           >
-            <div className="grid grid-cols-3 gap-1 border-b border-edge p-2">
-              {(["pages", "layers", "templates"] as const).map((t) => (
-                <button key={t} type="button" onClick={() => setTab(t)} className="relative h-8 rounded-lg text-[12px] font-bold capitalize">
+            <div className="grid grid-cols-4 gap-1 border-b border-edge p-2">
+              {(["pages", "layers", "insert", "templates"] as const).map((t) => (
+                <button key={t} type="button" onClick={() => setTab(t)} className="relative h-8 rounded-lg text-[11px] font-bold capitalize">
                   {tab === t && <motion.span layoutId="left-tab" transition={spring} className="absolute inset-0 rounded-lg bg-hover" />}
                   <span className={`relative ${tab === t ? "text-ink" : "text-muted"}`}>{t}</span>
                 </button>
@@ -140,8 +141,13 @@ export function LeftSidebar({ editor, open, onToggle }: { editor: Editor | null;
                 </>
               )}
 
+              {tab === "insert" && <InsertPanel editor={editor} />}
+
               {tab === "templates" && (
                 <div className="space-y-2">
+                  <button type="button" onClick={() => useUiStore.getState().setGalleryOpen(true)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#5b8cff] to-[#b36bff] py-2.5 text-[13px] font-bold text-white shadow-[0_8px_24px_rgba(91,140,255,0.3)]">
+                    ✨ Browse all {TEMPLATES.length} templates
+                  </button>
                   {TEMPLATES.map((t) => (
                     <button
                       key={t.id}

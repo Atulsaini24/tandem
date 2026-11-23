@@ -60,7 +60,7 @@ const PANELS: readonly Panel[] = [
   {
     mode: "Slides",
     prompt: "…a market slide with the three numbers that matter",
-    caption: "Big-number layouts, cards, timelines, comparisons, quotes and charts.",
+    caption: "Fourteen layouts in ten themes — and every slide opens in Studio for editing.",
     ratio: "960 / 540",
     svg: () =>
       slide({
@@ -75,6 +75,25 @@ const PANELS: readonly Panel[] = [
           { value: "530M", label: "WhatsApp users in India", delta: "+9% YoY" },
         ],
         subtitle: "Every one of these stores already has WhatsApp — none of them want another app.",
+      }),
+  },
+  {
+    mode: "Slides",
+    prompt: "…and a pricing slide with three plans, the middle one most popular",
+    caption: "Statement, team, pricing, process and 2×2 layouts — restyle a whole deck in one click.",
+    ratio: "960 / 540",
+    svg: () =>
+      slide({
+        layout: "pricing",
+        theme: "royal",
+        kicker: "Pricing",
+        index: 6,
+        title: "Simple plans for every shop",
+        items: [
+          { title: "Starter", value: "₹0", text: "1 store; Daily stock alerts; WhatsApp only" },
+          { title: "Pro", value: "₹299/mo", text: "Unlimited items; Auto reorders; Expiry alerts; Hindi + 8 languages" },
+          { title: "Chain", value: "₹1,999/mo", text: "Up to 10 stores; Distributor sync; Analytics dashboard" },
+        ],
       }),
   },
   {
@@ -273,7 +292,7 @@ export function TemplateMarquee({ onOpen }: { onOpen: (id: string) => void }) {
         <h2 className="mt-4 max-w-4xl font-display text-[clamp(40px,5.5vw,76px)] leading-[0.98] text-white">
           Start from a <em className="bg-gradient-to-r from-[#9fb8ff] to-[#ffb08f] bg-clip-text text-transparent">finished example.</em>
         </h2>
-        <p className="mt-4 max-w-2xl text-[16px] leading-relaxed text-white/55">A pitch deck, a metrics dashboard, a roadmap, a 3D explainer and more — full of real content, ready to edit.</p>
+        <p className="mt-4 max-w-2xl text-[16px] leading-relaxed text-white/55">48 templates in 8 categories — decks, dashboards, strategy canvases, diagrams, workshops, 3D and lessons — full of real content, ready to edit.</p>
       </div>
       <div className="mt-14 space-y-5 [mask-image:linear-gradient(90deg,transparent,black_10%,black_90%,transparent)]">
         {rows.map((row, r) => (

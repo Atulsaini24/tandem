@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { CHART_THEMES, CHART_TYPES, chartSvg, parseChart } from "./charts";
-import { parseSlide, SLIDE_THEMES, slideSvg } from "./slides";
+import { autoKpis, parseTable } from "./chart-data";
+import { parseSlide, SLIDE_THEMES, slideSvg, type SlideSpec } from "./slides";
+import { TEMPLATES } from "./templates";
+
+const svg0 = (spec: SlideSpec | undefined): string => (spec ? slideSvg(spec, 960, 540) : "");
 import { parseScene, sceneRadius } from "./scenes";
 
 describe("chart specs (untrusted input)", () => {
@@ -108,6 +112,13 @@ describe("designed slides and charts", () => {
     { layout: "compare", title: "Why", columns: [{ title: "Old", items: ["slow"] }, { title: "New", items: ["fast"] }] },
     { layout: "quote", title: "Say", quote: { text: "Great", author: "Ana" } },
     { layout: "closing", title: "Ask", items },
+    { layout: "statement", title: "Great ideas deserve *great tools* & <care>" },
+    { layout: "team", title: "Team", items: items.map((i) => ({ ...i, value: "CEO" })) },
+    { layout: "pricing", title: "Plans", items: items.map((i) => ({ ...i, value: "₹299/mo", text: "One; Two; Three" })) },
+    { layout: "process", title: "Steps", items },
+    { layout: "matrix", title: "Focus", axes: ["Effort", "Impact"], items: [...items, { icon: "", title: "Four", text: "x" }] },
+    { layout: "stats", title: "Hero", stats: [{ value: "98%", label: "uptime", delta: "+1%" }] },
+    { layout: "cards", title: "Pending", items, pending: true },
   ];
 
   it("draws every layout in every theme as well-formed SVG, escaping text", () => {
@@ -115,6 +126,7 @@ describe("designed slides and charts", () => {
       for (const l of layouts) {
         const spec = parseSlide(JSON.stringify({ ...l, theme, deck: "Deck", index: 1, total: 9 }));
         expect(spec?.layout).toBe(l.layout);
+        expect(svg0(spec)).not.toContain("*great");
         if (!spec) continue;
         const svg = slideSvg(spec, 960, 540);
         assertWellFormed(svg);
@@ -136,6 +148,42 @@ describe("designed slides and charts", () => {
       const svg = chartSvg(spec, 860, 600, CHART_THEMES.dark);
       assertWellFormed(svg);
       expect(svg).toContain("Up and to the right.");
+    }
+  });
+});
+
+describe("chart data helpers", () => {
+  it("reads a pasted spreadsheet with or without headers", () => {
+    const t = parseTable("Month\tRevenue\tCosts\nJan\t212\t318\nFeb\t$228\t322");
+    expect(t?.labels).toEqual(["Jan", "Feb"]);
+    expect(t?.series.map((s) => s.name)).toEqual(["Revenue", "Costs"]);
+    expect(t?.series[0]?.values).toEqual([212, 228]);
+    const csv = parseTable("A,1\nB,2\nC,3");
+    expect(csv?.series[0]?.values).toEqual([1, 2, 3]);
+    expect(parseTable("   ")).toBeUndefined();
+  });
+
+  it("works out headline numbers from the data", () => {
+    const k = autoKpis(["Jan", "Feb", "Mar"], [{ name: "Sales", values: [100, 150, 200] }], "$");
+    expect(k.map((x) => x.value)).toEqual(["$450", "Mar", "+100%"]);
+  });
+});
+
+describe("template library", () => {
+  it("has many templates, unique ids, every one builds valid shapes", () => {
+    expect(TEMPLATES.length).toBeGreaterThanOrEqual(40);
+    expect(new Set(TEMPLATES.map((t) => t.id)).size).toBe(TEMPLATES.length);
+    for (const t of TEMPLATES) {
+      const shapes = t.build();
+      expect(shapes.length, t.id).toBeGreaterThan(0);
+      const keys = new Set(shapes.map((s) => s.key));
+      expect(keys.size, t.id).toBe(shapes.length);
+      for (const s of shapes) {
+        if (s.props.from) expect(keys.has(s.props.from), t.id).toBe(true);
+        if (s.props.to) expect(keys.has(s.props.to), t.id).toBe(true);
+        if (s.props.kind === "slide") expect(parseSlide(s.props.data), t.id).toBeDefined();
+        if (s.props.kind === "chart") expect(parseChart(s.props.data), t.id).toBeDefined();
+      }
     }
   });
 });

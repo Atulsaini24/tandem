@@ -8,6 +8,7 @@ import { CANVAS_THEMES, hex } from "../canvas/theme";
 import { linkProps, navigate } from "../router";
 import { useUiStore } from "../state/ui-store";
 import { Icon, Logo, softSpring, spring } from "../ui/kit";
+import { TemplateGallery } from "../ui/TemplateGallery";
 import { ThemeToggle } from "../ui/ThemeToggle";
 
 const svgUrl = (svg: string): string => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -93,6 +94,7 @@ export default function Boards() {
   const boards = useBoards();
   const dark = useUiStore((s) => s.theme === "dark");
   const [query, setQuery] = useState("");
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [join, setJoin] = useState("");
   const previews = useMemo(() => new Map(TEMPLATES.map((t) => [t.id, templatePreview(t, dark)])), [dark]);
   useEffect(() => {
@@ -166,7 +168,7 @@ export default function Boards() {
                 <p className="text-[11px] text-muted">An infinite canvas</p>
               </div>
             </motion.button>
-            {TEMPLATES.map((t, i) => (
+            {TEMPLATES.slice(0, 10).map((t, i) => (
               <motion.button
                 key={t.id}
                 type="button"
@@ -187,8 +189,31 @@ export default function Boards() {
                 </div>
               </motion.button>
             ))}
+            <motion.button
+              type="button"
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ ...softSpring, delay: 0.45 }}
+              whileHover={{ y: -4 }}
+              onClick={() => setGalleryOpen(true)}
+              className="group flex w-44 shrink-0 snap-start flex-col justify-between overflow-hidden rounded-3xl bg-gradient-to-br from-[#5b8cff] via-[#8b6cff] to-[#ff7a59] p-4 text-left text-white shadow-[0_16px_40px_rgba(91,140,255,0.35)] sm:w-auto"
+            >
+              <span className="text-[28px] transition-transform duration-500 group-hover:rotate-12 group-hover:scale-110">✨</span>
+              <span>
+                <span className="block text-[15px] font-extrabold">All {TEMPLATES.length} templates</span>
+                <span className="block text-[11px] text-white/80">Decks, dashboards, canvases, diagrams, 3D</span>
+              </span>
+            </motion.button>
           </div>
         </section>
+        <TemplateGallery
+          open={galleryOpen}
+          onClose={() => setGalleryOpen(false)}
+          onPick={(id) => {
+            setGalleryOpen(false);
+            openNew(id);
+          }}
+        />
 
         <section className="mt-12">
           <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
