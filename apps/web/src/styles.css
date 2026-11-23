@@ -151,3 +151,7 @@ canvas {
 /* Placeholder slides while the AI writes them. */
 .reveal .a-shimmer { animation: rv-shimmer 1.6s ease-in-out infinite; }
 @keyframes rv-shimmer { 50% { opacity: 0.45; } }
+
+/* Editing slide text on the canvas: only tagged text takes the pointer. */
+.slide-edit * { pointer-events: none; }
+.slide-edit text[data-f] { pointer-events: bounding-box; cursor: text; }

@@ -97,6 +97,19 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
           </button>
         </motion.div>
       )}
+      {!historyOpen && !viewOnly && !aiOpen && (
+        <motion.button
+          key="ai-fab"
+          type="button"
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.6, opacity: 0 }}
+          onClick={() => useUiStore.getState().setAiOpen(true)}
+          className="pointer-events-auto absolute bottom-[86px] right-3 flex h-12 items-center gap-2 rounded-full bg-gradient-to-r from-[#5b8cff] to-[#b36bff] px-4 text-[14px] font-bold text-white shadow-[0_12px_30px_rgba(91,140,255,0.45)] sm:hidden"
+        >
+          <Icon name="sparkle" className="h-4 w-4" /> AI
+        </motion.button>
+      )}
       {!historyOpen && (
         <motion.div
           key="dock"
@@ -104,9 +117,9 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 40, opacity: 0 }}
           transition={{ ...spring, delay: 0.05 }}
-          className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4"
+          className="pointer-events-none absolute inset-x-0 bottom-[max(12px,env(safe-area-inset-bottom))] flex justify-center px-2 sm:bottom-4 sm:px-4"
         >
-          <div data-tour="dock" className={`pointer-events-auto flex max-w-full items-center gap-0.5 p-1.5 ${panel}`}>
+          <div data-tour="dock" className={`scroll-quiet pointer-events-auto flex max-w-full items-center gap-0.5 overflow-x-auto p-1.5 [&>*]:shrink-0 ${panel}`}>
             {TOOLS.map((tool) => (
               <ToolButton key={tool.id} tool={tool} disabled={tool.edits && locked} />
             ))}

@@ -31,7 +31,8 @@ type Mode =
   | { kind: "arrow"; start: Point; from: NodeId | undefined }
   | { kind: "arrowEnd"; id: NodeId; end: "start" | "end"; group: number }
   | { kind: "pen"; points: Point[] }
-  | { kind: "quick"; id: NodeId; side: "n" | "e" | "s" | "w"; start: Point };
+  | { kind: "quick"; id: NodeId; side: "n" | "e" | "s" | "w"; start: Point }
+  | { kind: "pinch"; dist: number; mid: Point };
 
 const TOOL_KEYS: Record<string, Tool> = {
   v: "select",
@@ -84,6 +85,11 @@ export class Controller {
   readonly #disposers: Array<() => void> = [];
   #mode: Mode = { kind: "idle" };
   #space = false;
+  /** Fingers on the screen (touch only): two = pinch to zoom and pan. */
+  #touches = new Map<number, Point>();
+  /** Last single tap (touch), for double-tap = double-click. */
+  #lastTap: { at: number; point: Point; start: Point } | undefined;
+  #tapStart: Point | undefined;
   /** The shape showing quick-connect handles. */
   #qc: NodeId | undefined;
 
@@ -202,6 +208,26 @@ export class Controller {
     this.#canvas.focus({ preventScroll: true });
     this.#canvas.setPointerCapture(e.pointerId);
 
+    if (e.pointerType === "touch") {
+      this.#touches.set(e.pointerId, screen);
+      this.#tapStart = this.#touches.size === 1 ? screen : undefined;
+      if (this.#touches.size >= 2) {
+        // A second finger: whatever the first one started becomes a pinch.
+        this.#cancelGesture();
+        const [a, b] = [...this.#touches.values()];
+        if (a && b) this.#mode = { kind: "pinch", dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+        return;
+      }
+      // One finger on empty space pans, like a map (no box-select on a phone).
+      if (ui.tool === "select" && !ui.presenting && !ui.voting && this.#hit(world) === undefined && !this.#handleAt(world) && !this.#quickAt(world)) {
+        this.#editor.stopFollowing();
+        if (ui.editing) ui.setEditing(undefined);
+        this.#editor.select([]);
+        this.#mode = { kind: "pan", last: screen };
+        return;
+      }
+    }
+
     const readOnly = this.#editor.locked;
     if (e.button === 1 || (e.button === 0 && (this.#space || readOnly || ui.tool === "hand"))) {
       this.#editor.stopFollowing();
@@ -316,9 +342,23 @@ export class Controller {
   #move(e: PointerEvent): void {
     const screen = this.#point(e);
     const world = this.#editor.renderer.screenToWorld(screen);
-    this.#editor.updatePointer(world);
     const mode = this.#mode;
     const renderer = this.#editor.renderer;
+    if (e.pointerType === "touch" && this.#touches.has(e.pointerId)) {
+      this.#touches.set(e.pointerId, screen);
+      if (mode.kind === "pinch") {
+        const [a, b] = [...this.#touches.values()];
+        if (!a || !b) return;
+        const dist = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        renderer.panBy(mid.x - mode.mid.x, mid.y - mode.mid.y);
+        renderer.zoomBy(dist / mode.dist, mid);
+        mode.dist = dist;
+        mode.mid = mid;
+        return;
+      }
+    }
+    this.#editor.updatePointer(world);
     if (mode.kind !== "idle" && mode.kind !== "quick" && this.#qc !== undefined) this.#setQuick(undefined);
     switch (mode.kind) {
       case "pan":
@@ -447,6 +487,42 @@ export class Controller {
 
   #up(e: PointerEvent): void {
     if (this.#canvas.hasPointerCapture(e.pointerId)) this.#canvas.releasePointerCapture(e.pointerId);
+    if (e.pointerType === "touch") {
+      this.#touches.delete(e.pointerId);
+      if (this.#mode.kind === "pinch") {
+        // Lifting one finger of a pinch ends it; the other finger doesn't start anything.
+        if (this.#touches.size === 0) this.#mode = { kind: "idle" };
+        return;
+      }
+      // Double-tap = double-click (edit text, explore 3D, open a slide).
+      const start = this.#tapStart;
+      const end = this.#point(e);
+      this.#tapStart = undefined;
+      if (start && Math.hypot(end.x - start.x, end.y - start.y) < 10 && e.type === "pointerup") {
+        const last = this.#lastTap;
+        if (last && performance.now() - last.at < 320 && Math.hypot(end.x - last.point.x, end.y - last.point.y) < 30) {
+          this.#lastTap = undefined;
+          this.#finishUp(e);
+          this.#doubleClick(e);
+          return;
+        }
+        this.#lastTap = { at: performance.now(), point: end, start };
+      }
+    }
+    this.#finishUp(e);
+  }
+
+  /** Abandon a gesture in progress (a second finger landed): clear its previews. */
+  #cancelGesture(): void {
+    const r = this.#editor.renderer;
+    r.guides = [];
+    r.draft = undefined;
+    r.attachTarget = undefined;
+    r.marquee = undefined;
+    this.#mode = { kind: "idle" };
+  }
+
+  #finishUp(e: PointerEvent): void {
     const world = this.#editor.renderer.screenToWorld(this.#point(e));
     const mode = this.#mode;
     const renderer = this.#editor.renderer;

@@ -348,7 +348,13 @@ export class Editor {
       useUiStore.getState().setOrbiting(id);
       return;
     }
-    if (shape.kind === "chart" || shape.kind === "slide") {
+    if (shape.kind === "slide") {
+      // Slides: edit the text right where it is (Studio is a click away).
+      this.select([id]);
+      useUiStore.getState().setSlideEdit(id);
+      return;
+    }
+    if (shape.kind === "chart") {
       this.select([id]);
       useUiStore.getState().setStudio(id);
       return;

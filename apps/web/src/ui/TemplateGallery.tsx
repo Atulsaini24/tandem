@@ -56,7 +56,7 @@ function Gallery({ onClose, onPick }: { onClose: () => void; onPick: (id: string
   }, [category, query]);
   return (
     <motion.div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm md:p-4"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -69,8 +69,8 @@ function Gallery({ onClose, onPick }: { onClose: () => void; onPick: (id: string
       }}
       onWheel={(e) => e.stopPropagation()}
     >
-      <motion.div initial={{ y: 30, scale: 0.97, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} exit={{ y: 20, opacity: 0 }} transition={spring} className="flex h-[min(880px,94vh)] w-[min(1440px,97vw)] overflow-hidden rounded-[28px] border border-edge bg-paper shadow-[0_40px_120px_rgba(0,0,0,0.45)]">
-        <nav className="flex w-[230px] shrink-0 flex-col gap-1 border-r border-edge bg-field/50 p-3">
+      <motion.div initial={{ y: 30, scale: 0.97, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} exit={{ y: 20, opacity: 0 }} transition={spring} className="flex h-[100dvh] w-screen overflow-hidden border-edge bg-paper shadow-[0_40px_120px_rgba(0,0,0,0.45)] md:h-[min(880px,94vh)] md:w-[min(1440px,97vw)] md:rounded-[28px] md:border">
+        <nav className="hidden w-[230px] shrink-0 flex-col gap-1 border-r border-edge bg-field/50 p-3 md:flex">
           <p className="px-2 pb-2 pt-1 text-[18px] font-extrabold tracking-tight text-ink">Templates</p>
           {(["All", ...TEMPLATE_CATEGORIES] as const).map((c) => (
             <button key={c} type="button" onClick={() => setCategory(c)} className={`flex h-10 items-center gap-2.5 rounded-xl px-3 text-left text-[13px] font-semibold transition-colors ${category === c ? "bg-ink text-paper" : "text-ink hover:bg-hover"}`}>
@@ -85,7 +85,7 @@ function Gallery({ onClose, onPick }: { onClose: () => void; onPick: (id: string
           </div>
         </nav>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center gap-3 border-b border-edge px-5 py-3.5">
+          <header className="flex items-center gap-2 border-b border-edge px-3 py-3 md:gap-3 md:px-5 md:py-3.5">
             <label className="flex h-10 flex-1 items-center gap-2 rounded-xl border border-line bg-field px-3 focus-within:border-accent">
               <Icon name="search" className="h-4 w-4 text-muted" />
               <input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${TEMPLATES.length} templates — pitch, OKR, dashboard, 3D…`} className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none" />
@@ -94,7 +94,15 @@ function Gallery({ onClose, onPick }: { onClose: () => void; onPick: (id: string
               Close <Kbd>Esc</Kbd>
             </button>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <div className="scroll-quiet flex gap-1.5 overflow-x-auto border-b border-edge px-3 py-2 md:hidden">
+            {(["All", ...TEMPLATE_CATEGORIES] as const).map((c) => (
+              <button key={c} type="button" onClick={() => setCategory(c)} className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[12px] font-semibold ${category === c ? "bg-ink text-paper" : "border border-line text-ink"}`}>
+                <span>{ICONS[c]}</span>
+                {c}
+              </button>
+            ))}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 md:p-5">
             <motion.div layout className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               <AnimatePresence mode="popLayout">
                 {shown.map((t, i) => (

@@ -210,18 +210,22 @@ export function TopBar({ editor, onShare }: { editor: Editor | null; onShare: ()
         initial={{ y: -12, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={spring}
-        className="pointer-events-auto absolute inset-x-0 top-0 z-20 flex h-14 items-center gap-2 border-b border-edge bg-paper/85 px-3 backdrop-blur-xl"
+        className="pointer-events-auto absolute inset-x-0 top-0 z-20 flex h-14 items-center gap-1.5 border-b border-edge bg-paper/85 px-2 backdrop-blur-xl sm:gap-2 sm:px-3"
       >
         <a {...linkProps("/boards")} title="All boards" className="grid h-9 w-9 place-items-center rounded-xl hover:bg-hover">
           <Logo className="h-6 w-6" />
         </a>
-        <span className="h-5 w-px bg-line" />
-        <Title editor={editor} />
+        <span className="hidden h-5 w-px bg-line sm:block" />
+        <div className="min-w-0 flex-1 sm:flex-none">
+          <Title editor={editor} />
+        </div>
         {viewMode && <span className="rounded-lg bg-accent/15 px-2 py-1 text-[11px] font-bold text-accent">View only</span>}
         <SyncButton editor={editor} />
-        <div className="ml-auto flex items-center gap-1.5">
-          <Avatars editor={editor} />
-          <span className="mx-1 h-5 w-px bg-line" />
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
+          <div className="hidden sm:block">
+            <Avatars editor={editor} />
+          </div>
+          <span className="mx-1 hidden h-5 w-px bg-line sm:block" />
           <motion.button
             type="button"
             onClick={() => editor?.startPresenting()}
@@ -242,10 +246,12 @@ export function TopBar({ editor, onShare }: { editor: Editor | null; onShare: ()
             className="flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3.5 text-[13px] font-semibold text-white shadow-[0_6px_16px_rgba(47,99,255,0.35)] hover:brightness-110 disabled:opacity-40"
           >
             <Icon name="share" className="h-4 w-4" />
-            Share
+            <span className="hidden sm:inline">Share</span>
           </motion.button>
           <ExportMenu editor={editor} />
-          <ThemeToggle compact />
+          <div className="hidden sm:block">
+            <ThemeToggle compact />
+          </div>
         </div>
       </motion.header>
       <AnimatePresence>

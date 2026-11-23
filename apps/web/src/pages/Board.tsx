@@ -15,6 +15,7 @@ import { PresentMode } from "../ui/PresentMode";
 import { RadialMenu } from "../ui/RadialMenu";
 import { RitualsPanel, TimerPill } from "../ui/Rituals";
 import { Reveal } from "../ui/Reveal";
+import { SlideTextEdit } from "../ui/SlideTextEdit";
 import { Scenes3D } from "../ui/Scenes3D";
 import { ShareDialog } from "../ui/ShareDialog";
 import { Studio } from "../ui/Studio";
@@ -28,7 +29,22 @@ const HEADER = 56;
 const LEFT = 256;
 const RIGHT = 300;
 
+const isPhone = (): boolean => window.innerWidth < 768;
+
+/** Tracks whether we're on a phone-sized screen. */
+function usePhone(): boolean {
+  const [phone, setPhone] = useState(isPhone);
+  useEffect(() => {
+    const on = (): void => setPhone(isPhone());
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return phone;
+}
+
 function readPanels(): { left: boolean; right: boolean } {
+  // Phones start with the canvas clear; panels open as drawers on demand.
+  if (isPhone()) return { left: false, right: false };
   try {
     const saved = JSON.parse(localStorage.getItem("canvas:panels") ?? "null") as { left?: boolean; right?: boolean } | null;
     return { left: saved?.left ?? window.innerWidth >= 1200, right: saved?.right ?? window.innerWidth >= 1000 };
@@ -46,6 +62,7 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
   const [editor, setEditor] = useState<Editor | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [panels, setPanels] = useState(readPanels);
+  const phone = usePhone();
   const { docId, token, viewMode, template } = route;
   const presenting = useUiStore((s) => s.presenting !== undefined);
   const aiOpen = useUiStore((s) => s.aiOpen);
@@ -85,20 +102,24 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
   const toggle = (side: "left" | "right"): void => {
     setPanels((p) => {
       const next = { ...p, [side]: !p[side] };
-      try {
-        localStorage.setItem("canvas:panels", JSON.stringify(next));
-      } catch {
-        // fine
+      // A phone's drawers don't change the desktop layout you saved.
+      if (!isPhone()) {
+        try {
+          localStorage.setItem("canvas:panels", JSON.stringify(next));
+        } catch {
+          // fine
+        }
       }
       return next;
     });
   };
 
   const chrome = !presenting;
+  // On a phone the panels float over the canvas instead of shrinking it.
   const inset = {
     top: chrome ? HEADER : 0,
-    left: chrome && panels.left ? LEFT : 0,
-    right: chrome && panels.right ? RIGHT : 0,
+    left: chrome && panels.left && !phone ? LEFT : 0,
+    right: chrome && panels.right && !phone ? RIGHT : 0,
     bottom: 0,
   };
 
@@ -109,6 +130,7 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
         <div ref={hostRef} className="absolute inset-0" />
         <Scenes3D editor={editor} />
         <Reveal editor={editor} />
+        <SlideTextEdit editor={editor} />
         {chrome && (
           <div className="pointer-events-none absolute inset-0">
             <EmptyState editor={editor} />
@@ -132,6 +154,14 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
         )}
       </div>
 
+      {chrome && phone && (panels.left || panels.right) && (
+        <button
+          type="button"
+          aria-label="Close panel"
+          className="absolute inset-0 top-14 z-[5] bg-black/40 backdrop-blur-[2px]"
+          onClick={() => setPanels({ left: false, right: false })}
+        />
+      )}
       {chrome && (
         <div className="pointer-events-none absolute inset-0">
           <TopBar editor={editor} onShare={() => setShareOpen(true)} />

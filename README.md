@@ -40,6 +40,9 @@ links, and an AI that runs on your own machine.
 | **Templates** | **48 finished templates in 8 categories** in a searchable gallery with live previews: 9 decks (pitch, QBR, launch, marketing, sales, sustainability, onboarding, case study, lesson), 6 dashboards, OKRs, Gantt, Eisenhower, sprint, SWOT, business model and lean canvas, journey map, persona, RACI, org chart, architecture, fishbone, decision tree, user flow, workshops, 3D scenes and study tools |
 | **Studio** | Double-click a slide or chart: live preview with animation, layout thumbnails, 10 themes (one slide or the whole deck), every field, a chart data grid with spreadsheet paste, sort and auto KPIs, 6 palettes, and AI rewrites ("make it punchier") |
 | **Insert** | Any of 14 slide layouts, 9 chart types or 6 3D scenes in one click, no AI needed |
+| **3D explore** | Double-click a scene (or "Explore in 3D"): orbit, zoom, pan, click objects to fly to them, drag to move, recolor, resize, change motion and glow, add or delete objects, pause, fullscreen; changes are saved for everyone |
+| **Edit on canvas** | Double-click a slide and click any title, card, number or quote to type right there |
+| **Mobile** | Phone layout with drawers, a scrolling dock and a floating AI button; pinch to zoom, two-finger pan, double-tap to edit |
 
 ## How it fits together
 

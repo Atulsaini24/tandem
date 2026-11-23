@@ -213,8 +213,16 @@ export function Showcase() {
         start: "top top",
         end: "bottom bottom",
         onUpdate: (self) => {
-          const distance = tr.scrollWidth - window.innerWidth;
-          gsap.to(tr, { x: -self.progress * distance, duration: 0.6, ease: "power3.out", overwrite: true });
+          // Slide so the panel in focus sits in the middle of the screen, on any width.
+          const items = [...tr.children] as HTMLElement[];
+          const pos = self.progress * (items.length - 1);
+          const a = items[Math.floor(pos)];
+          const b = items[Math.min(items.length - 1, Math.floor(pos) + 1)];
+          if (!a || !b) return;
+          const f = pos - Math.floor(pos);
+          const left = a.offsetLeft + (b.offsetLeft - a.offsetLeft) * f;
+          const x = -(left - (window.innerWidth - a.offsetWidth) / 2);
+          gsap.to(tr, { x, duration: 0.6, ease: "power3.out", overwrite: true });
           setProgress(self.progress);
           setActive(Math.min(PANELS.length - 1, Math.round(self.progress * (PANELS.length - 1))));
         },

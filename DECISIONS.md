@@ -663,3 +663,32 @@ canvas + MediaRecorder, so there's no ffmpeg or Playwright dependency. The merge
 split-screen page is served by intercepting one URL on the app's own origin, so it can
 reach both editors without adding a page to the app.
 
+## D076 — 3D scenes are explorable, and edits go back into the spec
+The 3D view's canvas took pointer events by default, so double-clicks never reached the
+board and scenes could not be opened at all. Now the 3D canvas only takes the pointer while
+exploring. Explore mode orbits, zooms and pans (mouse or touch); clicking an object flies the
+camera to it and opens a card to rename, recolor, resize, change its motion or glow,
+duplicate or delete it; dragging a selected object moves it along the ground (an orbiting
+one changes its orbit radius); objects can be added from a palette; the animation can be
+paused; the view can be reset or made fullscreen. Every change is written back into the
+scene spec, so it's shared, undoable and survives reloads. Fullscreen pins the same element
+to the window rather than moving it elsewhere in the page: moving it tore down the 3D
+labels mid-render and broke picking. Phones always explore fullscreen.
+
+## D077 — Slide text is edited where it's drawn
+Every piece of text a slide design draws carries the path of the field it shows
+(`data-f="items.2.text"`). Double-clicking a slide lays the same design over the canvas,
+live: hovering outlines what's editable, clicking opens a text box exactly over that text
+in its size, weight and alignment, and Enter writes the field back into the spec (Shift+Enter
+for a new line, Esc to cancel). A new title also renames the slide's frame. A test renders
+every layout and checks each tagged field exists in the spec. Studio stays one click away
+for layout, theme and structure.
+
+## D078 — Phones get a phone layout, and real touch gestures
+On narrow screens the side panels become drawers over the canvas (closed by default, with a
+backdrop) instead of shrinking it, the header drops secondary controls, the dock scrolls,
+an AI button floats above it, Studio and the template gallery go full-screen and stack, and
+the homepage gallery centres the panel in focus at any width. The canvas understands
+touch: two fingers pinch to zoom and pan, one finger on empty space pans like a map, and a
+double-tap acts as a double-click.
+

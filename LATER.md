@@ -74,8 +74,6 @@ the current milestone passes its gate.
   would skip the dialog.
 - **Board registry across devices:** the dashboard lists boards this browser has opened. With
   sign-in, list them from the server.
-- **3D scene editing:** scenes are generated whole; selecting and moving individual 3D objects
-  needs picking and a gizmo.
+- **3D rotation and height:** objects move along the ground; a rotate/raise gizmo would finish
+  the set.
 - **Layers panel:** rename, lock and hide per layer; drag to reorder.
-- **On-canvas text editing for slides:** Studio edits every field; clicking a title on the
-  canvas itself to type in place would be quicker for small fixes.

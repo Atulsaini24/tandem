@@ -264,7 +264,7 @@ function kickerPill(ctx: SCtx, x: number, y: number, delay: number): number {
   const size = 11.5;
   const w = textWidth(label, size, 700) * 1.12 + 30;
   ctx.out.push(
-    `<g ${anim("a-up", delay)}><rect x="${x}" y="${y}" width="${n1(w)}" height="26" rx="13" fill="${t.accent}" fill-opacity="${t.dark ? 0.16 : 0.12}" stroke="${t.accent}" stroke-opacity="0.45"/><circle cx="${x + 13}" cy="${y + 13}" r="3.5" fill="${t.accent}"/>${textLines([label], x + 23, y + 17.2, { size, fill: t.dark ? mix(t.accent, "#ffffff", 0.45) : t.accent, weight: 700, letterSpacing: 1.2 })}</g>`,
+    `<g ${anim("a-up", delay)}><rect x="${x}" y="${y}" width="${n1(w)}" height="26" rx="13" fill="${t.accent}" fill-opacity="${t.dark ? 0.16 : 0.12}" stroke="${t.accent}" stroke-opacity="0.45"/><circle cx="${x + 13}" cy="${y + 13}" r="3.5" fill="${t.accent}"/>${textLines([label], x + 23, y + 17.2, { field: "kicker", size, fill: t.dark ? mix(t.accent, "#ffffff", 0.45) : t.accent, weight: 700, letterSpacing: 1.2 })}</g>`,
   );
   return w;
 }
@@ -275,12 +275,12 @@ function header(ctx: SCtx): void {
   const width = SLIDE_W - PAD * 2;
   const size = fitSize(spec.title, width, 36, 22, 800, 2);
   const lines = wrapText(spec.title, width, size, 800, 2);
-  out.push(textLines(lines, PAD, 104 + size * 0.2, { size, fill: t.ink, weight: 800, lineHeight: size * 1.12, letterSpacing: -0.6, cls: "a-up", delay: 80 }));
+  out.push(textLines(lines, PAD, 104 + size * 0.2, { field: "title", size, fill: t.ink, weight: 800, lineHeight: size * 1.12, letterSpacing: -0.6, cls: "a-up", delay: 80 }));
   let y = 104 + size * 0.2 + (lines.length - 1) * size * 1.12;
   const showSub = spec.subtitle && spec.layout !== "quote" && spec.layout !== "chart" && spec.layout !== "stats";
   if (showSub) {
     const sub = wrapText(spec.subtitle, width * 0.86, 16, 400, 1);
-    out.push(textLines(sub, PAD, y + 32, { size: 16, fill: t.muted, weight: 400, cls: "a-up", delay: 160 }));
+    out.push(textLines(sub, PAD, y + 32, { field: "subtitle", size: 16, fill: t.muted, weight: 400, cls: "a-up", delay: 160 }));
     y += 32;
   }
   contentTop = y + 36;
@@ -329,15 +329,15 @@ function drawTitle(ctx: SCtx): void {
   const size = fitSize(spec.title, width, 58, 30, 800, 3);
   const lines = wrapText(spec.title, width, size, 800, 3);
   const top = 212 + size * 0.8;
-  out.push(textLines(lines, PAD, top, { size, fill: t.ink, weight: 800, lineHeight: size * 1.06, letterSpacing: -1.4, cls: "a-up", delay: 120 }));
+  out.push(textLines(lines, PAD, top, { field: "title", size, fill: t.ink, weight: 800, lineHeight: size * 1.06, letterSpacing: -1.4, cls: "a-up", delay: 120 }));
   let y = top + (lines.length - 1) * size * 1.06;
   out.push(`<rect x="${PAD}" y="${n1(y + 26)}" width="96" height="5" rx="2.5" fill="url(#${P}ac)" ${anim("a-growx", 380)}/>`);
   y += 26;
   if (spec.subtitle) {
     const sub = wrapText(spec.subtitle, width, 18, 400, 3);
-    out.push(textLines(sub, PAD, y + 44, { size: 18, fill: t.muted, weight: 400, lineHeight: 26, cls: "a-up", delay: 300 }));
+    out.push(textLines(sub, PAD, y + 44, { field: "subtitle", size: 18, fill: t.muted, weight: 400, lineHeight: 26, cls: "a-up", delay: 300 }));
   }
-  if (spec.deck && spec.deck !== spec.title) out.push(textLines(wrapText(spec.deck.toUpperCase(), 520, 11, 700, 1), PAD, 64, { size: 11, fill: t.muted, weight: 700, letterSpacing: 1.6, cls: "a-fade", delay: 500 }));
+  if (spec.deck && spec.deck !== spec.title) out.push(textLines(wrapText(spec.deck.toUpperCase(), 520, 11, 700, 1), PAD, 64, { field: "deck", size: 11, fill: t.muted, weight: 700, letterSpacing: 1.6, cls: "a-fade", delay: 500 }));
 }
 
 function defs(ctx: SCtx, d: string): void {
@@ -350,14 +350,14 @@ function drawClosing(ctx: SCtx): void {
   out.push(`<circle cx="${cx}" cy="250" r="170" fill="none" stroke="${t.ink}" stroke-opacity="0.08"/>`);
   out.push(`<circle cx="${cx}" cy="250" r="240" fill="none" stroke="${t.ink}" stroke-opacity="0.05"/>`);
   const label = spec.kicker ? spec.kicker.toUpperCase() : "NEXT STEPS";
-  out.push(textLines([label], cx, 150, { size: 12, fill: t.accent, weight: 800, anchor: "middle", letterSpacing: 2.4, cls: "a-up", delay: 0 }));
+  out.push(textLines([label], cx, 150, { field: "kicker", size: 12, fill: t.accent, weight: 800, anchor: "middle", letterSpacing: 2.4, cls: "a-up", delay: 0 }));
   const size = fitSize(spec.title, 760, 52, 28, 800, 2);
   const lines = wrapText(spec.title, 760, size, 800, 2);
-  out.push(textLines(lines, cx, 205 + size * 0.5, { size, fill: t.ink, weight: 800, anchor: "middle", lineHeight: size * 1.08, letterSpacing: -1.2, cls: "a-up", delay: 100 }));
+  out.push(textLines(lines, cx, 205 + size * 0.5, { field: "title", size, fill: t.ink, weight: 800, anchor: "middle", lineHeight: size * 1.08, letterSpacing: -1.2, cls: "a-up", delay: 100 }));
   let y = 205 + size * 0.5 + (lines.length - 1) * size * 1.08;
   if (spec.subtitle) {
     const sub = wrapText(spec.subtitle, 640, 17, 400, 2);
-    out.push(textLines(sub, cx, y + 42, { size: 17, fill: t.muted, anchor: "middle", lineHeight: 25, cls: "a-up", delay: 220 }));
+    out.push(textLines(sub, cx, y + 42, { field: "subtitle", size: 17, fill: t.muted, anchor: "middle", lineHeight: 25, cls: "a-up", delay: 220 }));
     y += 42 + (sub.length - 1) * 25;
   }
   const actions = spec.items.slice(0, 3);
@@ -391,9 +391,9 @@ function drawAgenda(ctx: SCtx): void {
     const num = String(i + 1).padStart(2, "0");
     const parts = [
       textLines([num], x, y + 30, { size: 30, fill: t.accent, weight: 800, letterSpacing: -1 }),
-      textLines(wrapText(item.title || item.text, colW - 70, 18, 700, 1), x + 62, y + 18, { size: 18, fill: t.ink, weight: 700 }),
+      textLines(wrapText(item.title || item.text, colW - 70, 18, 700, 1), x + 62, y + 18, { field: `items.${i}.${item.title ? "title" : "text"}`, size: 18, fill: t.ink, weight: 700 }),
     ];
-    if (item.title && item.text) parts.push(textLines(wrapText(item.text, colW - 70, 13.5, 400, 2), x + 62, y + 40, { size: 13.5, fill: t.muted, lineHeight: 19 }));
+    if (item.title && item.text) parts.push(textLines(wrapText(item.text, colW - 70, 13.5, 400, 2), x + 62, y + 40, { field: `items.${i}.text`, size: 13.5, fill: t.muted, lineHeight: 19 }));
     parts.push(`<line x1="${x}" x2="${n1(x + colW)}" y1="${n1(y + rowH - 12)}" y2="${n1(y + rowH - 12)}" stroke="${t.ink}" stroke-opacity="0.09"/>`);
     out.push(`<g ${anim("a-left", 200 + i * 110)}>${parts.join("")}</g>`);
   });
@@ -422,17 +422,17 @@ function drawCards(ctx: SCtx): void {
       parts.push(badge(ctx, x + 40, y + 42, 20, mark));
       const tw = cw - 92;
       const titleLines = wrapText(item.title, tw, 17, 700, 1);
-      parts.push(textLines(titleLines, x + 76, y + 40, { size: 17, fill: t.ink, weight: 700 }));
+      parts.push(textLines(titleLines, x + 76, y + 40, { field: `items.${i}.title`, size: 17, fill: t.ink, weight: 700 }));
       const maxLines = Math.max(1, Math.floor((ch - 64) / 19));
-      if (item.text) parts.push(textLines(wrapText(item.text, tw, 13.5, 400, maxLines), x + 76, y + 64, { size: 13.5, fill: t.muted, lineHeight: 19 }));
+      if (item.text) parts.push(textLines(wrapText(item.text, tw, 13.5, 400, maxLines), x + 76, y + 64, { field: `items.${i}.text`, size: 13.5, fill: t.muted, lineHeight: 19 }));
     } else {
       parts.push(badge(ctx, x + 42, y + 44, 21, mark));
       const tw = cw - 44;
       const titleLines = wrapText(item.title, tw, 18, 700, 2);
-      parts.push(textLines(titleLines, x + 22, y + 98, { size: 18, fill: t.ink, weight: 700, lineHeight: 22 }));
+      parts.push(textLines(titleLines, x + 22, y + 98, { field: `items.${i}.title`, size: 18, fill: t.ink, weight: 700, lineHeight: 22 }));
       const ty = y + 98 + (titleLines.length - 1) * 22 + 26;
       const maxLines = Math.max(1, Math.floor((y + ch - 18 - ty) / 19) + 1);
-      if (item.text) parts.push(textLines(wrapText(item.text, tw, 13.5, 400, maxLines), x + 22, ty, { size: 13.5, fill: t.muted, lineHeight: 19 }));
+      if (item.text) parts.push(textLines(wrapText(item.text, tw, 13.5, 400, maxLines), x + 22, ty, { field: `items.${i}.text`, size: 13.5, fill: t.muted, lineHeight: 19 }));
     }
     out.push(`<g ${anim("a-up", 220 + i * 110)}>${parts.join("")}</g>`);
   });
@@ -444,11 +444,11 @@ function drawStats(ctx: SCtx): void {
   const hero = stats[0];
   if (stats.length === 1 && hero) {
     const size = fitSize(hero.value, 700, 170, 60, 800, 1);
-    out.push(textLines([hero.value], PAD - 6, contentTop + size * 0.82 + 6, { size, fill: `url(#${P}acv)`, weight: 800, letterSpacing: -6, cls: "a-pop", delay: 200 }));
+    out.push(textLines([hero.value], PAD - 6, contentTop + size * 0.82 + 6, { field: "stats.0.value", size, fill: `url(#${P}acv)`, weight: 800, letterSpacing: -6, cls: "a-pop", delay: 200 }));
     const y = contentTop + size * 0.82 + 54;
-    out.push(textLines(wrapText(hero.label, 620, 22, 600, 2), PAD, y, { size: 22, fill: t.ink, weight: 600, lineHeight: 28, cls: "a-up", delay: 420 }));
-    if (hero.delta) out.push(textLines([hero.delta], SLIDE_W - PAD, contentTop + 40, { size: 20, fill: deltaTone(hero.delta) === "down" ? (t.dark ? "#ff6b61" : "#d6453d") : t.dark ? "#3ddc8b" : "#13915a", weight: 800, anchor: "end", cls: "a-pop", delay: 600 }));
-    if (spec.subtitle) out.push(textLines(wrapText(spec.subtitle, 760, 16, 400, 2), PAD, y + 62, { size: 16, fill: t.muted, lineHeight: 22, cls: "a-up", delay: 560 }));
+    out.push(textLines(wrapText(hero.label, 620, 22, 600, 2), PAD, y, { field: "stats.0.label", size: 22, fill: t.ink, weight: 600, lineHeight: 28, cls: "a-up", delay: 420 }));
+    if (hero.delta) out.push(textLines([hero.delta], SLIDE_W - PAD, contentTop + 40, { field: "stats.0.delta", size: 20, fill: deltaTone(hero.delta) === "down" ? (t.dark ? "#ff6b61" : "#d6453d") : t.dark ? "#3ddc8b" : "#13915a", weight: 800, anchor: "end", cls: "a-pop", delay: 600 }));
+    if (spec.subtitle) out.push(textLines(wrapText(spec.subtitle, 760, 16, 400, 2), PAD, y + 62, { field: "subtitle", size: 16, fill: t.muted, lineHeight: 22, cls: "a-up", delay: 560 }));
     return;
   }
   const n = stats.length;
@@ -464,19 +464,19 @@ function drawStats(ctx: SCtx): void {
     const tone = deltaTone(st.delta);
     const deltaColor = tone === "up" ? (t.dark ? "#3ddc8b" : "#13915a") : tone === "down" ? (t.dark ? "#ff6b61" : "#d6453d") : t.muted;
     const parts = [panel(ctx, x, y, cw, ch)];
-    parts.push(textLines([st.value], x + 24, y + 30 + size * 0.86, { size, fill: `url(#${P}acv)`, weight: 800, letterSpacing: -1.5 }));
+    parts.push(textLines([st.value], x + 24, y + 30 + size * 0.86, { field: `stats.${i}.value`, size, fill: `url(#${P}acv)`, weight: 800, letterSpacing: -1.5 }));
     const labelY = y + 30 + size * 0.86 + 34;
-    parts.push(textLines(wrapText(st.label, cw - 48, 15, 500, 3), x + 24, labelY, { size: 15, fill: t.ink, weight: 600, lineHeight: 20 }));
+    parts.push(textLines(wrapText(st.label, cw - 48, 15, 500, 3), x + 24, labelY, { field: `stats.${i}.label`, size: 15, fill: t.ink, weight: 600, lineHeight: 20 }));
     if (st.delta) {
       const dw = textWidth(st.delta, 12, 700) + 22;
       parts.push(`<rect x="${n1(x + 24)}" y="${n1(y + ch - 46)}" width="${n1(dw)}" height="24" rx="12" fill="${deltaColor}" fill-opacity="0.16"/>`);
-      parts.push(textLines([st.delta], x + 24 + dw / 2, y + ch - 29.5, { size: 12, fill: deltaColor, weight: 700, anchor: "middle" }));
+      parts.push(textLines([st.delta], x + 24 + dw / 2, y + ch - 29.5, { field: `stats.${i}.delta`, size: 12, fill: deltaColor, weight: 700, anchor: "middle" }));
     }
     out.push(`<g ${anim("a-up", 200 + i * 140)}>${parts.join("")}</g>`);
   });
   if (hasSub) {
     const sy = y + ch + 28;
-    out.push(`<g ${anim("a-up", 300 + n * 140)}><rect x="${PAD}" y="${n1(sy)}" width="4" height="40" rx="2" fill="url(#${P}acv)"/>${textLines(wrapText(spec.subtitle, SLIDE_W - PAD * 2 - 30, 16, 500, 2), PAD + 22, sy + 16, { size: 16, fill: t.ink, weight: 500, lineHeight: 22 })}</g>`);
+    out.push(`<g ${anim("a-up", 300 + n * 140)}><rect x="${PAD}" y="${n1(sy)}" width="4" height="40" rx="2" fill="url(#${P}acv)"/>${textLines(wrapText(spec.subtitle, SLIDE_W - PAD * 2 - 30, 16, 500, 2), PAD + 22, sy + 16, { field: "subtitle", size: 16, fill: t.ink, weight: 500, lineHeight: 22 })}</g>`);
   }
 }
 
@@ -500,15 +500,15 @@ function drawChart(ctx: SCtx): void {
   if (spec.subtitle) {
     const lines = wrapText(spec.subtitle, w - 34, 15, 600, 4);
     const hh = lines.length * 21 + 30;
-    out.push(`<g ${anim("a-left", 600)}>${panel(ctx, x, y, w, hh)}<rect x="${n1(x)}" y="${n1(y + 14)}" width="4" height="${n1(hh - 28)}" rx="2" fill="url(#${P}acv)"/>${textLines(lines, x + 20, y + 26, { size: 15, fill: t.ink, weight: 600, lineHeight: 21 })}</g>`);
+    out.push(`<g ${anim("a-left", 600)}>${panel(ctx, x, y, w, hh)}<rect x="${n1(x)}" y="${n1(y + 14)}" width="4" height="${n1(hh - 28)}" rx="2" fill="url(#${P}acv)"/>${textLines(lines, x + 20, y + 26, { field: "subtitle", size: 15, fill: t.ink, weight: 600, lineHeight: 21 })}</g>`);
     y += hh + 16;
   }
   spec.items.slice(0, 3).forEach((item, i) => {
     if (y > SLIDE_H - 110) return;
     const lines = wrapText(item.text || item.title, w - 44, 13, 400, 3);
     const parts = [badge(ctx, x + 14, y + 12, 12, item.icon || String(i + 1))];
-    if (item.title && item.text) parts.push(textLines(wrapText(item.title, w - 40, 14, 700, 1), x + 36, y + 17, { size: 14, fill: t.ink, weight: 700 }));
-    parts.push(textLines(lines, x + 36, y + (item.title && item.text ? 38 : 17), { size: 13, fill: t.muted, lineHeight: 18 }));
+    if (item.title && item.text) parts.push(textLines(wrapText(item.title, w - 40, 14, 700, 1), x + 36, y + 17, { field: `items.${i}.title`, size: 14, fill: t.ink, weight: 700 }));
+    parts.push(textLines(lines, x + 36, y + (item.title && item.text ? 38 : 17), { field: `items.${i}.${item.text ? "text" : "title"}`, size: 13, fill: t.muted, lineHeight: 18 }));
     out.push(`<g ${anim("a-left", 750 + i * 120)}>${parts.join("")}</g>`);
     y += (item.title && item.text ? 30 : 10) + lines.length * 18 + 16;
   });
@@ -520,9 +520,9 @@ function drawQuote(ctx: SCtx): void {
   out.push(textLines(["“"], PAD - 6, contentTop + 120, { size: 150, fill: `url(#${P}ac)`, weight: 800, cls: "a-pop", delay: 100 }));
   const size = fitSize(text, SLIDE_W - PAD * 2 - 80, 34, 20, 600, 4);
   const lines = wrapText(text, SLIDE_W - PAD * 2 - 80, size, 600, 4);
-  out.push(textLines(lines, PAD + 80, contentTop + 52 + size, { size, fill: t.ink, weight: 600, lineHeight: size * 1.3, letterSpacing: -0.4, cls: "a-up", delay: 220 }));
+  out.push(textLines(lines, PAD + 80, contentTop + 52 + size, { field: "quote.text", size, fill: t.ink, weight: 600, lineHeight: size * 1.3, letterSpacing: -0.4, cls: "a-up", delay: 220 }));
   const ay = contentTop + 52 + size + (lines.length - 1) * size * 1.3 + 44;
-  if (spec.quote.author) out.push(`<g ${anim("a-up", 420)}><rect x="${PAD + 80}" y="${n1(ay - 5)}" width="28" height="2.5" fill="${t.accent}"/>${textLines([spec.quote.author], PAD + 120, ay, { size: 15, fill: t.muted, weight: 700 })}</g>`);
+  if (spec.quote.author) out.push(`<g ${anim("a-up", 420)}><rect x="${PAD + 80}" y="${n1(ay - 5)}" width="28" height="2.5" fill="${t.accent}"/>${textLines([spec.quote.author], PAD + 120, ay, { field: "quote.author", size: 15, fill: t.muted, weight: 700 })}</g>`);
 }
 
 function drawTimeline(ctx: SCtx): void {
@@ -545,9 +545,9 @@ function drawTimeline(ctx: SCtx): void {
       `<circle cx="${n1(cx)}" cy="${lineY}" r="15" fill="${t.accent}" fill-opacity="0.18"/>`,
       `<circle cx="${n1(cx)}" cy="${lineY}" r="7" fill="${i === 0 ? t.accent : t.dark ? t.ink : t.accent2}"/>`,
       textLines([item.icon ? item.icon : `STEP ${i + 1}`], x, lineY - 30, { size: item.icon ? 22 : 11, fill: t.accent, weight: 800, letterSpacing: item.icon ? 0 : 1.6 }),
-      textLines(titleLines, x, lineY + 48, { size: 16, fill: t.ink, weight: 700, lineHeight: 20 }),
+      textLines(titleLines, x, lineY + 48, { field: `items.${i}.title`, size: 16, fill: t.ink, weight: 700, lineHeight: 20 }),
     ];
-    if (item.text) parts.push(textLines(wrapText(item.text, colW, 13, 400, 7 - titleLines.length), x, lineY + 52 + titleLines.length * 20 + 8, { size: 13, fill: t.muted, lineHeight: 18 }));
+    if (item.text) parts.push(textLines(wrapText(item.text, colW, 13, 400, 7 - titleLines.length), x, lineY + 52 + titleLines.length * 20 + 8, { field: `items.${i}.text`, size: 13, fill: t.muted, lineHeight: 18 }));
     out.push(`<g ${anim("a-up", 300 + i * 160)}>${parts.join("")}</g>`);
   });
 }
@@ -565,13 +565,13 @@ function drawCompare(ctx: SCtx): void {
     const good = k === 1;
     const parts = [panel(ctx, x, y, cw, ch, good)];
     if (good) parts.push(`<rect x="${n1(x)}" y="${n1(y)}" width="${n1(cw)}" height="4" rx="2" fill="url(#${P}ac)"/>`);
-    parts.push(textLines([col.title.toUpperCase()], x + 26, y + 38, { size: 13, fill: good ? t.accent : t.muted, weight: 800, letterSpacing: 1.6 }));
+    parts.push(textLines([col.title.toUpperCase()], x + 26, y + 38, { field: `columns.${k}.title`, size: 13, fill: good ? t.accent : t.muted, weight: 800, letterSpacing: 1.6 }));
     const rowH = Math.min(56, (ch - 70) / Math.max(1, col.items.length));
     col.items.forEach((item, i) => {
       const iy = y + 64 + i * rowH;
       parts.push(`<circle cx="${n1(x + 36)}" cy="${n1(iy + 8)}" r="11" fill="${good ? t.accent : t.muted}" fill-opacity="${good ? 0.2 : 0.14}"/>`);
       parts.push(good ? `<path d="M${n1(x + 31)},${n1(iy + 8)} l3.5,3.5 l6.5,-7" fill="none" stroke="${t.accent}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>` : `<path d="M${n1(x + 32)},${n1(iy + 4)} l8,8 M${n1(x + 40)},${n1(iy + 4)} l-8,8" stroke="${t.muted}" stroke-width="2" stroke-linecap="round"/>`);
-      parts.push(textLines(wrapText(item, cw - 86, 15, good ? 600 : 400, 2), x + 58, iy + 13, { size: 15, fill: good ? t.ink : t.muted, weight: good ? 600 : 400, lineHeight: 19 }));
+      parts.push(textLines(wrapText(item, cw - 86, 15, good ? 600 : 400, 2), x + 58, iy + 13, { field: `columns.${k}.items.${i}`, size: 15, fill: good ? t.ink : t.muted, weight: good ? 600 : 400, lineHeight: 19 }));
     });
     out.push(`<g ${anim(k === 0 ? "a-left" : "a-right", 220 + k * 220)}>${parts.join("")}</g>`);
   });
@@ -610,12 +610,12 @@ function drawStatement(ctx: SCtx): void {
   if (line.length > 0) lines.push(line);
   const lh = size * 1.08;
   const top = SLIDE_H / 2 - ((lines.length - 1) * lh) / 2 - (spec.subtitle ? 26 : 0);
-  if (spec.kicker) out.push(textLines([spec.kicker.toUpperCase()], SLIDE_W / 2, top - size - 6, { size: 13, fill: t.accent, weight: 800, anchor: "middle", letterSpacing: 2.6, cls: "a-up", delay: 0 }));
+  if (spec.kicker) out.push(textLines([spec.kicker.toUpperCase()], SLIDE_W / 2, top - size - 6, { field: "kicker", size: 13, fill: t.accent, weight: 800, anchor: "middle", letterSpacing: 2.6, cls: "a-up", delay: 0 }));
   lines.slice(0, 3).forEach((ws, i) => {
     const spans = ws.map((x, k) => `<tspan${x.hi ? ` fill="url(#${P}ac)"` : ""}>${(k ? " " : "") + x.w.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</tspan>`).join("");
-    out.push(`<text x="${SLIDE_W / 2}" y="${n1(top + i * lh + size * 0.35)}" text-anchor="middle" font-family="${FONT}" font-size="${n1(size)}" font-weight="800" letter-spacing="-1.6" fill="${t.ink}" ${anim("a-up", 120 + i * 140)}>${spans}</text>`);
+    out.push(`<text x="${SLIDE_W / 2}" y="${n1(top + i * lh + size * 0.35)}" text-anchor="middle" font-family="${FONT}" font-size="${n1(size)}" font-weight="800" letter-spacing="-1.6" fill="${t.ink}" data-f="title" ${anim("a-up", 120 + i * 140)}>${spans}</text>`);
   });
-  if (spec.subtitle) out.push(textLines(wrapText(spec.subtitle, 680, 18, 400, 2), SLIDE_W / 2, top + (Math.min(3, lines.length) - 1) * lh + size * 0.35 + 54, { size: 18, fill: t.muted, anchor: "middle", lineHeight: 26, cls: "a-up", delay: 520 }));
+  if (spec.subtitle) out.push(textLines(wrapText(spec.subtitle, 680, 18, 400, 2), SLIDE_W / 2, top + (Math.min(3, lines.length) - 1) * lh + size * 0.35 + 54, { field: "subtitle", size: 18, fill: t.muted, anchor: "middle", lineHeight: 26, cls: "a-up", delay: 520 }));
 }
 
 const initials = (name: string): string =>
@@ -642,10 +642,10 @@ function drawTeam(ctx: SCtx): void {
       `<circle cx="${n1(cx)}" cy="${n1(y + r + 4)}" r="${r + 5}" fill="none" stroke="url(#${P}ac)" stroke-width="2"/>`,
       `<circle cx="${n1(cx)}" cy="${n1(y + r + 4)}" r="${r}" fill="url(#${P}acv)"/>`,
       textLines([p.icon || initials(p.title) || "•"], cx, y + r + 4 + (p.icon ? r * 0.36 : r * 0.3), { size: p.icon ? r * 0.95 : r * 0.78, fill: "#ffffff", weight: 800, anchor: "middle" }),
-      textLines(wrapText(p.title, cw - 24, 17, 700, 1), cx, y + r * 2 + 34, { size: 17, fill: t.ink, weight: 700, anchor: "middle" }),
+      textLines(wrapText(p.title, cw - 24, 17, 700, 1), cx, y + r * 2 + 34, { field: `items.${i}.title`, size: 17, fill: t.ink, weight: 700, anchor: "middle" }),
     ];
-    if (p.value) parts.push(textLines([p.value.toUpperCase()], cx, y + r * 2 + 54, { size: 11, fill: t.accent, weight: 800, anchor: "middle", letterSpacing: 1.4 }));
-    if (p.text) parts.push(textLines(wrapText(p.text, cw - 30, 12.5, 400, rows > 1 ? 2 : 3), cx, y + r * 2 + (p.value ? 74 : 56), { size: 12.5, fill: t.muted, anchor: "middle", lineHeight: 17 }));
+    if (p.value) parts.push(textLines([p.value.toUpperCase()], cx, y + r * 2 + 54, { field: `items.${i}.value`, size: 11, fill: t.accent, weight: 800, anchor: "middle", letterSpacing: 1.4 }));
+    if (p.text) parts.push(textLines(wrapText(p.text, cw - 30, 12.5, 400, rows > 1 ? 2 : 3), cx, y + r * 2 + (p.value ? 74 : 56), { field: `items.${i}.text`, size: 12.5, fill: t.muted, anchor: "middle", lineHeight: 17 }));
     out.push(`<g ${anim("a-pop", 200 + i * 110)}>${parts.join("")}</g>`);
   });
 }
@@ -670,10 +670,10 @@ function drawPricing(ctx: SCtx): void {
       parts.push(`<rect x="${n1(x + cw - lw - 14)}" y="${n1(y + 16)}" width="${n1(lw)}" height="20" rx="10" fill="url(#${P}ac)"/>`);
       parts.push(textLines([label], x + cw - 14 - lw / 2, y + 29.5, { size: 10, fill: "#ffffff", weight: 800, anchor: "middle", letterSpacing: 1 }));
     }
-    parts.push(textLines(wrapText(`${plan.icon ? `${plan.icon} ` : ""}${plan.title}`, cw - 40, 16, 700, 1), x + 22, y + 32, { size: 16, fill: t.ink, weight: 700 }));
+    parts.push(textLines(wrapText(`${plan.icon ? `${plan.icon} ` : ""}${plan.title}`, cw - 40, 16, 700, 1), x + 22, y + 32, { field: `items.${i}.title`, size: 16, fill: t.ink, weight: 700 }));
     const price = plan.value || "—";
     const ps = fitSize(price, cw - 44, 40, 20, 800, 1);
-    parts.push(textLines([price], x + 22, y + 46 + ps * 0.9, { size: ps, fill: pop ? `url(#${P}acv)` : t.ink, weight: 800, letterSpacing: -1 }));
+    parts.push(textLines([price], x + 22, y + 46 + ps * 0.9, { field: `items.${i}.value`, size: ps, fill: pop ? `url(#${P}acv)` : t.ink, weight: 800, letterSpacing: -1 }));
     const features = plan.text.split(/[;•\n]|,\s(?=[A-Z0-9₹$])/).map((f) => f.trim()).filter(Boolean).slice(0, 6);
     let fy = y + 46 + ps + 34;
     for (const f of features) {
@@ -718,11 +718,11 @@ function drawProcess(ctx: SCtx): void {
     const parts = [
       `<polygon points="${pts.map(([a, b]) => `${n1(a ?? 0)},${n1(b ?? 0)}`).join(" ")}" fill="${fill}" fill-opacity="${t.dark ? 0.9 : 0.95}"/>`,
       textLines([st.icon || String(i + 1).padStart(2, "0")], x + (first ? 16 : tip + 8), y + ah / 2 + 8, { size: st.icon ? 22 : 20, fill: "#ffffff", weight: 800 }),
-      textLines(wrapText(st.value || `Step ${i + 1}`, cw - 70, 11, 800, 1), x + (first ? 16 : tip + 8) + 40, y + ah / 2 + 4, { size: 11, fill: "#ffffff", weight: 800, letterSpacing: 1, opacity: 0.9 }),
-      textLines(wrapText(st.title, cw - 12, 16, 700, 2), x + 6, y + ah + 34, { size: 16, fill: t.ink, weight: 700, lineHeight: 20 }),
+      textLines(wrapText(st.value || `Step ${i + 1}`, cw - 70, 11, 800, 1), x + (first ? 16 : tip + 8) + 40, y + ah / 2 + 4, { field: `items.${i}.value`, size: 11, fill: "#ffffff", weight: 800, letterSpacing: 1, opacity: 0.9 }),
+      textLines(wrapText(st.title, cw - 12, 16, 700, 2), x + 6, y + ah + 34, { field: `items.${i}.title`, size: 16, fill: t.ink, weight: 700, lineHeight: 20 }),
     ];
     const tl = wrapText(st.title, cw - 12, 16, 700, 2).length;
-    if (st.text) parts.push(textLines(wrapText(st.text, cw - 12, 12.5, 400, 6), x + 6, y + ah + 34 + tl * 20 + 6, { size: 12.5, fill: t.muted, lineHeight: 17 }));
+    if (st.text) parts.push(textLines(wrapText(st.text, cw - 12, 12.5, 400, 6), x + 6, y + ah + 34 + tl * 20 + 6, { field: `items.${i}.text`, size: 12.5, fill: t.muted, lineHeight: 17 }));
     out.push(`<g ${anim("a-left", 200 + i * 140)}>${parts.join("")}</g>`);
     void P;
   });
@@ -741,7 +741,7 @@ function drawMatrix(ctx: SCtx): void {
   out.push(`<line x1="${x0}" y1="${n1(y0 + h)}" x2="${n1(x0 + w)}" y2="${n1(y0 + h)}" stroke="${t.ink}" stroke-opacity="0.35" stroke-width="1.5"/>`);
   out.push(`<line x1="${x0}" y1="${n1(y0 + h)}" x2="${x0}" y2="${n1(y0)}" stroke="${t.ink}" stroke-opacity="0.35" stroke-width="1.5"/>`);
   const [ax, ay] = spec.axes;
-  if (ax) out.push(textLines([`${ax.toUpperCase()} →`], x0 + w, y0 + h + 22, { size: 11, fill: t.muted, weight: 800, anchor: "end", letterSpacing: 1.4 }));
+  if (ax) out.push(textLines([`${ax.toUpperCase()} →`], x0 + w, y0 + h + 22, { field: "axes.0", size: 11, fill: t.muted, weight: 800, anchor: "end", letterSpacing: 1.4 }));
   if (ay) out.push(`<text transform="translate(${PAD + 12} ${n1(y0)}) rotate(-90)" text-anchor="end" font-family="${FONT}" font-size="11" font-weight="800" letter-spacing="1.4" fill="${t.muted}">${ay.toUpperCase().replace(/&/g, "&amp;").replace(/</g, "&lt;")} →</text>`);
   // Top-right is the winner quadrant.
   const order: Array<[number, number]> = [
@@ -757,9 +757,9 @@ function drawMatrix(ctx: SCtx): void {
     const win = i === 0;
     const parts = [
       `<rect x="${n1(x)}" y="${n1(y)}" width="${n1(qw - 12)}" height="${n1(qh - 10)}" rx="16" fill="${win ? t.accent : t.panel}" fill-opacity="${win ? 0.16 : t.dark ? 0.55 : 0.9}" stroke="${win ? t.accent : t.grid}" stroke-opacity="${win ? 0.7 : 1}"/>`,
-      textLines([`${q.icon ? `${q.icon}  ` : ""}${q.title}`], x + 18, y + 32, { size: 17, fill: win ? (t.dark ? mix(t.accent, "#ffffff", 0.35) : t.accent) : t.ink, weight: 800 }),
+      textLines([`${q.icon ? `${q.icon}  ` : ""}${q.title}`], x + 18, y + 32, { field: `items.${i}.title`, size: 17, fill: win ? (t.dark ? mix(t.accent, "#ffffff", 0.35) : t.accent) : t.ink, weight: 800 }),
     ];
-    if (q.text) parts.push(textLines(wrapText(q.text, qw - 50, 13, 400, Math.max(1, Math.floor((qh - 60) / 18))), x + 18, y + 56, { size: 13, fill: t.muted, lineHeight: 18 }));
+    if (q.text) parts.push(textLines(wrapText(q.text, qw - 50, 13, 400, Math.max(1, Math.floor((qh - 60) / 18))), x + 18, y + 56, { field: `items.${i}.text`, size: 13, fill: t.muted, lineHeight: 18 }));
     out.push(`<g ${anim("a-pop", 200 + i * 130)}>${parts.join("")}</g>`);
     void P;
   });

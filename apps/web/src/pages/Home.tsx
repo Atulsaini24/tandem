@@ -186,7 +186,9 @@ function Story({ lenis }: { lenis: React.MutableRefObject<Lenis | null> }) {
 
       <div className="pointer-events-none absolute inset-0">
         <div className="flex h-screen items-center justify-center px-5">
-          <div data-hero className="pointer-events-auto max-w-5xl text-center">
+          <div data-hero className="pointer-events-auto relative max-w-5xl text-center">
+            {/* Phones: the 3D notes fly close behind the words; a soft dark glow keeps them readable. */}
+            <div className="pointer-events-none absolute -inset-x-6 -inset-y-10 -z-10 rounded-[48px] bg-[radial-gradient(ellipse_at_center,rgba(5,6,10,0.82),rgba(5,6,10,0.55)_55%,transparent_80%)] sm:hidden" />
             <a data-hero-fade {...linkProps("/boards")} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 py-1.5 pl-1.5 pr-4 text-[12px] font-semibold text-white/80 backdrop-blur-md transition-colors hover:bg-white/10">
               <span className="rounded-full bg-gradient-to-r from-[#2f63ff] to-[#ff8a5b] px-2 py-0.5 text-[10px] font-extrabold text-white">NEW</span>
               AI Studio: designed decks, live charts & 3D scenes

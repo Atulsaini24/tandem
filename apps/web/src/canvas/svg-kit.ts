@@ -73,6 +73,8 @@ export interface TextOpts {
   readonly letterSpacing?: number;
   /** Animation hook for the live overlay (see Reveal). */
   readonly cls?: string;
+  /** Which spec field this text shows ("title", "items.2.text"), for editing on the canvas. */
+  readonly field?: string;
   readonly delay?: number;
 }
 
@@ -91,6 +93,7 @@ export function textLines(lines: readonly string[], x: number, y: number, o: Tex
     o.opacity !== undefined ? `fill-opacity="${o.opacity}"` : "",
     o.letterSpacing ? `letter-spacing="${o.letterSpacing}"` : "",
     anim(o.cls, o.delay),
+    o.field ? `data-f="${esc(o.field)}"` : "",
   ]
     .filter(Boolean)
     .join(" ");

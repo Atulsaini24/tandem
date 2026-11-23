@@ -121,6 +121,9 @@ interface UiState {
   /** The template library is open. */
   readonly galleryOpen: boolean;
   setGalleryOpen(open: boolean): void;
+  /** The slide whose text is being edited right on the canvas. */
+  readonly slideEdit: string | undefined;
+  setSlideEdit(id: string | undefined): void;
   /** The slide or chart open in the Studio editor. */
   readonly studio: string | undefined;
   setStudio(id: string | undefined): void;
@@ -211,6 +214,8 @@ export const useUiStore = create<UiState>()((set) => ({
   orbiting: undefined,
   galleryOpen: false,
   setGalleryOpen: (galleryOpen) => set({ galleryOpen }),
+  slideEdit: undefined,
+  setSlideEdit: (slideEdit) => set({ slideEdit }),
   studio: undefined,
   setStudio: (studio) => set({ studio }),
   reveals: {},

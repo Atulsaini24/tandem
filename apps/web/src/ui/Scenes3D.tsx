@@ -2,10 +2,10 @@ import type { ShapeView } from "@canvas/doc";
 import { ContactShadows, Environment, Html, Lightformer, OrbitControls, Sky, Sparkles, Stars } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import type { Editor } from "../canvas/editor";
-import { parseScene, sceneRadius, type Backdrop, type Material, type SceneObject, type SceneSpec } from "../canvas/scenes";
+import { parseScene, sceneRadius, type Backdrop, type Material, type Motion, type SceneObject, type SceneSpec } from "../canvas/scenes";
 import { useUiStore } from "../state/ui-store";
 import { useSceneVersion } from "./useScene";
 
@@ -435,15 +435,61 @@ function Server({ o, index }: { o: SceneObject; index: number }) {
   );
 }
 
-// --- motion & composition ------------------------------------------------------------
+// --- motion, selection & exploring ---------------------------------------------------
+
+interface ExploreState {
+  /** The scene is being explored (orbit, select, drag). */
+  readonly on: boolean;
+  readonly selected: number | undefined;
+  select(index: number | undefined): void;
+  /** Object being dragged, or undefined. */
+  readonly dragging: number | undefined;
+  startDrag(index: number): void;
+  /** Drag finished: the new ground position. */
+  endDrag(index: number, x: number, z: number): void;
+}
+
+const NO_EXPLORE: ExploreState = { on: false, selected: undefined, select: () => {}, dragging: undefined, startDrag: () => {}, endDrag: () => {} };
+const ExploreCtx = createContext<ExploreState>(NO_EXPLORE);
+
+/** Scene time: stops when paused, so everything freezes in place and resumes smoothly. */
+interface Clock {
+  t: number;
+}
+const ClockCtx = createContext<{ current: Clock; paused: boolean }>({ current: { t: 0 }, paused: false });
+
+function Ticker({ clock, paused }: { clock: Clock; paused: boolean }) {
+  useFrame((_, dt) => {
+    if (!paused) clock.t += Math.min(dt, 0.1);
+  });
+  return null;
+}
+
+/** Live positions of objects being dragged, and the groups (for selection boxes and focus). */
+interface Live {
+  readonly overrides: Map<number, [number, number]>;
+  readonly groups: Map<number, THREE.Group>;
+}
+const LiveCtx = createContext<Live>({ overrides: new Map(), groups: new Map() });
 
 function Thing({ o, index, night }: { o: SceneObject; index: number; night: boolean }) {
   const ref = useRef<THREE.Group>(null);
-  useFrame(({ clock }) => {
+  const explore = useContext(ExploreCtx);
+  const { current: clock } = useContext(ClockCtx);
+  const live = useContext(LiveCtx);
+  useEffect(() => {
+    const g = ref.current;
+    if (g) live.groups.set(index, g);
+    return () => void live.groups.delete(index);
+  }, [index, live]);
+  useFrame(() => {
     const g = ref.current;
     if (!g) return;
-    const t = clock.elapsedTime * o.speed;
-    const [x, y, z] = o.position;
+    const t = clock.t * o.speed;
+    const drag = live.overrides.get(index);
+    const [x0, y, z0] = o.position;
+    const x = drag ? drag[0] : x0;
+    const z = drag ? drag[1] : z0;
     g.position.set(x, y, z);
     g.rotation.set(o.rotation[0], o.rotation[1], o.rotation[2]);
     g.scale.setScalar(1);
@@ -454,7 +500,7 @@ function Thing({ o, index, night }: { o: SceneObject; index: number; night: bool
       g.rotation.z = o.rotation[2] + Math.sin(t * 0.8 + index) * 0.06;
     }
     if (o.motion === "pulse") g.scale.setScalar(1 + Math.sin(t * 3 + index) * 0.08);
-    if (o.motion === "orbit") {
+    if (o.motion === "orbit" && !drag) {
       const r = o.orbitRadius || Math.hypot(x, z) || 2;
       const a = t * (0.9 / Math.sqrt(Math.max(0.5, r))) + index * 2.4;
       g.position.set(Math.cos(a) * r, y, Math.sin(a) * r);
@@ -463,19 +509,118 @@ function Thing({ o, index, night }: { o: SceneObject; index: number; night: bool
   });
   const [sx, sy] = o.size;
   const top = o.shape === "planet" || o.shape === "sphere" ? sx / 2 : Math.max(sy, 0.1) / 2;
+  const pickable = explore.on && o.shape !== "plane";
+  const selected = explore.selected === index;
   return (
-    <group ref={ref}>
+    <group
+      ref={ref}
+      onClick={(e) => {
+        if (!pickable) return;
+        e.stopPropagation();
+        explore.select(index);
+      }}
+      onPointerDown={(e) => {
+        // Press on the selected object and drag: move it along the ground.
+        if (!pickable || !selected) return;
+        e.stopPropagation();
+        explore.startDrag(index);
+      }}
+      onPointerOver={() => {
+        if (pickable) document.body.style.cursor = selected ? "grab" : "pointer";
+      }}
+      onPointerOut={() => {
+        if (pickable) document.body.style.cursor = "";
+      }}
+    >
       <Model o={o} index={index} night={night} />
       {o.glow && <pointLight intensity={Math.min(60, 8 + sx * 10)} distance={Math.max(6, sx * 8)} color={o.color} decay={1.6} />}
       {o.label && (
         <Html position={[0, top + 0.4, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-          <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/15 bg-black/55 px-2.5 py-1 text-[11px] font-semibold text-white shadow-lg backdrop-blur-md">
+          <span className={`flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-semibold text-white shadow-lg backdrop-blur-md transition-all ${selected ? "scale-110 border-[#5b8cff] bg-[#5b8cff]/70" : "border-white/15 bg-black/55"}`}>
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: o.color }} />
             {o.label}
           </span>
         </Html>
       )}
     </group>
+  );
+}
+
+/** A glowing box and ground ring around the selected object; follows it as it moves. */
+function SelectionMarker({ spec }: { spec: SceneSpec }) {
+  const explore = useContext(ExploreCtx);
+  const live = useContext(LiveCtx);
+  const box = useRef<THREE.Mesh>(null);
+  const ring = useRef<THREE.Mesh>(null);
+  const bounds = useMemo(() => new THREE.Box3(), []);
+  const size = useMemo(() => new THREE.Vector3(), []);
+  const center = useMemo(() => new THREE.Vector3(), []);
+  useFrame(({ clock }) => {
+    const g = explore.selected === undefined ? undefined : live.groups.get(explore.selected);
+    const b = box.current;
+    const r = ring.current;
+    if (!b || !r) return;
+    b.visible = r.visible = Boolean(g);
+    if (!g) return;
+    const o = explore.selected === undefined ? undefined : spec.objects[explore.selected];
+    b.visible = o?.shape !== "planet" && o?.shape !== "sphere";
+    bounds.setFromObject(g, true);
+    if (bounds.isEmpty()) return;
+    bounds.getSize(size);
+    bounds.getCenter(center);
+    b.position.copy(center);
+    b.scale.set(size.x + 0.15, size.y + 0.15, size.z + 0.15);
+    r.position.set(center.x, bounds.min.y + 0.02, center.z);
+    const pulse = 1 + Math.sin(clock.elapsedTime * 4) * 0.06;
+    const rr = Math.max(size.x, size.z) * 0.75 + 0.3;
+    r.scale.set(rr * pulse, rr * pulse, 1);
+  });
+  return (
+    <>
+      <mesh ref={box} visible={false}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshBasicMaterial color="#5b8cff" wireframe transparent opacity={0.85} toneMapped={false} />
+      </mesh>
+      <mesh ref={ring} visible={false} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.92, 1, 64]} />
+        <meshBasicMaterial color="#5b8cff" transparent opacity={0.9} side={THREE.DoubleSide} toneMapped={false} />
+      </mesh>
+    </>
+  );
+}
+
+/** While dragging: an invisible floor at the object's height that follows the pointer. */
+function DragFloor({ spec, r }: { spec: SceneSpec; r: number }) {
+  const explore = useContext(ExploreCtx);
+  const live = useContext(LiveCtx);
+  const index = explore.dragging;
+  const o = index === undefined ? undefined : spec.objects[index];
+  if (index === undefined || !o) return null;
+  const finish = (): void => {
+    const p = live.overrides.get(index);
+    document.body.style.cursor = "";
+    if (p) explore.endDrag(index, p[0], p[1]);
+    else explore.endDrag(index, o.position[0], o.position[2]);
+  };
+  return (
+    <mesh
+      position={[0, o.position[1], 0]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      onPointerMove={(e) => {
+        e.stopPropagation();
+        document.body.style.cursor = "grabbing";
+        const lim = r * 1.6;
+        live.overrides.set(index, [Math.max(-lim, Math.min(lim, e.point.x)), Math.max(-lim, Math.min(lim, e.point.z))]);
+      }}
+      onPointerUp={(e) => {
+        e.stopPropagation();
+        finish();
+      }}
+      onPointerLeave={finish}
+    >
+      <planeGeometry args={[r * 40, r * 40]} />
+      <meshBasicMaterial visible={false} />
+    </mesh>
   );
 }
 
@@ -497,19 +642,53 @@ function OrbitPaths({ spec }: { spec: SceneSpec }) {
   );
 }
 
-/** Camera flies in on first show, then the view drifts slowly until you take over. */
-function Rig({ r, orbiting }: { r: number; orbiting: boolean }) {
-  const { camera } = useThree();
+/**
+ * The camera: flies in on first show; then either drifts (on the board) or follows the
+ * explorer — flying to a selected object, and back home on "reset view".
+ */
+function Rig({ r, explore, reset }: { r: number; explore: ExploreState; reset: number }) {
+  const { camera, controls } = useThree();
+  const live = useContext(LiveCtx);
   const start = useRef<number | null>(null);
-  const target = useMemo(() => new THREE.Vector3(r * 0.78, r * 0.52, r * 0.95), [r]);
+  const home = useMemo(() => new THREE.Vector3(r * 0.78, r * 0.52, r * 0.95), [r]);
+  const fly = useRef<{ from: THREE.Vector3; to: THREE.Vector3; fromT: THREE.Vector3; toT: THREE.Vector3; at: number } | null>(null);
+  const now = useRef(0);
+  const target = (): THREE.Vector3 | undefined => (controls as unknown as { target?: THREE.Vector3 } | null)?.target;
+  // Selecting an object flies the camera to it.
+  useEffect(() => {
+    const g = explore.selected === undefined ? undefined : live.groups.get(explore.selected);
+    const t = target();
+    if (!g || !t) return;
+    const box = new THREE.Box3().setFromObject(g, true);
+    const c = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3()).length();
+    const dir = camera.position.clone().sub(t).normalize();
+    fly.current = { from: camera.position.clone(), to: c.clone().add(dir.multiplyScalar(Math.max(size * 2.2, 2.5))), fromT: t.clone(), toT: c, at: now.current };
+  }, [explore.selected]);
+  useEffect(() => {
+    const t = target();
+    if (reset === 0 || !t) return;
+    fly.current = { from: camera.position.clone(), to: home.clone(), fromT: t.clone(), toT: new THREE.Vector3(), at: now.current };
+  }, [reset]);
   useFrame(({ clock }) => {
+    now.current = clock.elapsedTime;
     if (start.current === null) start.current = clock.elapsedTime;
-    const t = Math.min(1, (clock.elapsedTime - start.current) / 2.2);
-    if (t >= 1 || orbiting) return;
-    const e = 1 - (1 - t) ** 3;
-    const from = target.clone().multiplyScalar(2.3).add(new THREE.Vector3(-r * 1.2, r * 0.9, 0));
-    camera.position.lerpVectors(from, target, e);
-    camera.lookAt(0, 0, 0);
+    const intro = Math.min(1, (clock.elapsedTime - start.current) / 2.2);
+    if (intro < 1 && !explore.on) {
+      const e = 1 - (1 - intro) ** 3;
+      const from = home.clone().multiplyScalar(2.3).add(new THREE.Vector3(-r * 1.2, r * 0.9, 0));
+      camera.position.lerpVectors(from, home, e);
+      camera.lookAt(0, 0, 0);
+      return;
+    }
+    const f = fly.current;
+    const t = target();
+    if (!f || !t) return;
+    const k = Math.min(1, (clock.elapsedTime - f.at) / 0.8);
+    const e = 1 - (1 - k) ** 3;
+    camera.position.lerpVectors(f.from, f.to, e);
+    t.lerpVectors(f.fromT, f.toT, e);
+    if (k >= 1) fly.current = null;
   });
   return null;
 }
@@ -559,29 +738,65 @@ function Backdrop({ kind, r }: { kind: Backdrop; r: number }) {
   );
 }
 
-export function SceneView({ spec, orbiting }: { spec: SceneSpec; orbiting: boolean }) {
+export interface SceneViewProps {
+  readonly spec: SceneSpec;
+  /** Exploring: orbit/zoom/pan, select, drag. Off on the board and the homepage. */
+  readonly orbiting: boolean;
+  readonly explore?: ExploreState;
+  readonly paused?: boolean;
+  readonly autoRotate?: boolean;
+  /** Bump to fly the camera back home. */
+  readonly reset?: number;
+}
+
+export function SceneView({ spec, orbiting, explore = NO_EXPLORE, paused = false, autoRotate, reset = 0 }: SceneViewProps) {
   const r = sceneRadius(spec);
   const night = spec.backdrop === "night" || spec.backdrop === "space";
   const hasGround = spec.objects.some((o) => o.shape === "plane");
   const floor = Math.min(...spec.objects.map((o) => o.position[1] - (o.shape === "planet" || o.shape === "sphere" ? o.size[0] : o.size[1]) / 2));
   const glowing = spec.objects.some((o) => o.glow) || night;
+  const clock = useRef<Clock>({ t: 0 }).current;
+  const live = useMemo<Live>(() => ({ overrides: new Map(), groups: new Map() }), []);
+  // A finished drag is saved into the spec; drop the live override once it's there.
+  useEffect(() => {
+    live.overrides.clear();
+  }, [spec, live]);
+  const rotate = autoRotate ?? !orbiting;
   return (
-    <Canvas shadows dpr={[1, 1.5]} gl={{ antialias: true }} camera={{ position: [r * 0.78, r * 0.52, r * 0.95], fov: 42, near: 0.05, far: 800 }}>
-      <Backdrop kind={spec.backdrop} r={r} />
-      {/* Reflections for metal and glass, from soft light panels (no download needed). */}
-      <Environment resolution={256} frames={1}>
-        <Lightformer form="rect" intensity={2.5} position={[0, 5, -6]} scale={[10, 4, 1]} />
-        <Lightformer form="rect" intensity={1.2} position={[-6, 2, 2]} rotation-y={Math.PI / 2} scale={[8, 3, 1]} color="#9fc2ff" />
-        <Lightformer form="ring" intensity={1.6} position={[5, 3, 4]} scale={3} color="#ffd9b0" />
-      </Environment>
-      {spec.objects.map((o, i) => (
-        <Thing key={i} o={o} index={i} night={night} />
-      ))}
-      <OrbitPaths spec={spec} />
-      {!hasGround && spec.backdrop !== "space" && <ContactShadows position={[0, floor - 0.01, 0]} opacity={0.55} scale={r * 3} blur={2.4} far={r} />}
-      <Rig r={r} orbiting={orbiting} />
-      <OrbitControls enabled={orbiting} autoRotate={!orbiting} autoRotateSpeed={0.45} enablePan={false} enableDamping minDistance={r * 0.3} maxDistance={r * 5} />
-      <Effects glow={glowing} />
+    // The canvas only takes pointer events while exploring: otherwise clicks go through to
+    // the board (to select, move, or double-click to explore).
+    <Canvas
+      shadows
+      dpr={[1, 1.5]}
+      gl={{ antialias: true }}
+      style={{ pointerEvents: orbiting ? "auto" : "none", touchAction: "none" }}
+      camera={{ position: [r * 0.78, r * 0.52, r * 0.95], fov: 42, near: 0.05, far: 800 }}
+      onPointerMissed={() => explore.select(undefined)}
+    >
+      <ExploreCtx.Provider value={explore}>
+        <ClockCtx.Provider value={{ current: clock, paused }}>
+          <LiveCtx.Provider value={live}>
+            <Ticker clock={clock} paused={paused} />
+            <Backdrop kind={spec.backdrop} r={r} />
+            {/* Reflections for metal and glass, from soft light panels (no download needed). */}
+            <Environment resolution={256} frames={1}>
+              <Lightformer form="rect" intensity={2.5} position={[0, 5, -6]} scale={[10, 4, 1]} />
+              <Lightformer form="rect" intensity={1.2} position={[-6, 2, 2]} rotation-y={Math.PI / 2} scale={[8, 3, 1]} color="#9fc2ff" />
+              <Lightformer form="ring" intensity={1.6} position={[5, 3, 4]} scale={3} color="#ffd9b0" />
+            </Environment>
+            {spec.objects.map((o, i) => (
+              <Thing key={i} o={o} index={i} night={night} />
+            ))}
+            <OrbitPaths spec={spec} />
+            <SelectionMarker spec={spec} />
+            <DragFloor spec={spec} r={r} />
+            {!hasGround && spec.backdrop !== "space" && <ContactShadows position={[0, floor - 0.01, 0]} opacity={0.55} scale={r * 3} blur={2.4} far={r} />}
+            <Rig r={r} explore={explore} reset={reset} />
+            <OrbitControls makeDefault enabled={orbiting && explore.dragging === undefined} autoRotate={rotate} autoRotateSpeed={0.45} enablePan={orbiting} enableDamping minDistance={r * 0.15} maxDistance={r * 6} />
+            <Effects glow={glowing} />
+          </LiveCtx.Provider>
+        </ClockCtx.Provider>
+      </ExploreCtx.Provider>
     </Canvas>
   );
 }
@@ -596,7 +811,7 @@ function Effects({ glow }: { glow: boolean }): ReactNode {
 }
 
 /** Keep a DOM box glued to a shape's screen rectangle (pan, zoom, move, resize). */
-function useScreenRect(editor: Editor, id: string): React.RefObject<HTMLDivElement | null> {
+function useScreenRect(editor: Editor, id: string, fullscreen: React.RefObject<boolean>): React.RefObject<HTMLDivElement | null> {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let raf = 0;
@@ -605,6 +820,14 @@ function useScreenRect(editor: Editor, id: string): React.RefObject<HTMLDivEleme
       const el = ref.current;
       const s = editor.renderer.lookup(id);
       if (!el || !s) return;
+      if (fullscreen.current) {
+        el.style.transform = "none";
+        el.style.width = "100vw";
+        el.style.height = "100vh";
+        el.style.borderRadius = "0";
+        el.style.opacity = "1";
+        return;
+      }
       const a = editor.renderer.worldToScreen({ x: s.x, y: s.y });
       const z = editor.renderer.viewport.zoom;
       el.style.transform = `translate(${a.x}px, ${a.y}px)`;
@@ -619,35 +842,272 @@ function useScreenRect(editor: Editor, id: string): React.RefObject<HTMLDivEleme
   return ref;
 }
 
+const SWATCHES = ["#ff5a5a", "#ff8a3d", "#ffd24a", "#3fcf7a", "#19c3a5", "#3d7bff", "#8b6cff", "#ff5fa2", "#f2f2f2", "#1d2029"];
+const MOTIONS: readonly Motion[] = ["none", "spin", "orbit", "bob", "float", "pulse"];
+const ADDABLE: ReadonlyArray<{ shape: string; label: string; icon: string; size: [number, number, number]; color: string; extra?: Record<string, unknown> }> = [
+  { shape: "planet", label: "Planet", icon: "🪐", size: [1, 1, 1], color: "#3d7bff" },
+  { shape: "tree", label: "Tree", icon: "🌳", size: [1.2, 1.4, 1.2], color: "#3f8f4a" },
+  { shape: "pine", label: "Pine", icon: "🌲", size: [1, 1.6, 1], color: "#2a7a46" },
+  { shape: "building", label: "Building", icon: "🏢", size: [1.6, 4, 1.6], color: "#2b3a55" },
+  { shape: "house", label: "House", icon: "🏠", size: [1.6, 1.3, 1.4], color: "#c98d5a" },
+  { shape: "rocket", label: "Rocket", icon: "🚀", size: [0.8, 2, 0.8], color: "#ff5a5a", extra: { motion: "float" } },
+  { shape: "car", label: "Car", icon: "🚗", size: [1, 0.6, 0.6], color: "#ffc53d" },
+  { shape: "person", label: "Person", icon: "🧍", size: [0.5, 1, 0.5], color: "#3d7bff" },
+  { shape: "cloud", label: "Cloud", icon: "☁️", size: [2.4, 1.1, 1.4], color: "#e9eef7", extra: { motion: "float", speed: 0.3 } },
+  { shape: "mountain", label: "Mountain", icon: "⛰️", size: [4, 3, 4], color: "#7b6a62" },
+  { shape: "server", label: "Server", icon: "🖥️", size: [1, 1.8, 0.8], color: "#3b4252" },
+  { shape: "crystal", label: "Crystal", icon: "💎", size: [0.9, 1.3, 0.9], color: "#7a6bff", extra: { glow: true, motion: "spin" } },
+];
+
+/** The scene as plain JSON (what the shape stores), with one object changed. */
+function serialize(spec: SceneSpec, objects: readonly SceneObject[]): string {
+  return JSON.stringify({ title: spec.title, backdrop: spec.backdrop, objects });
+}
+
+function ToolButton({ children, onClick, title, active }: { children: ReactNode; onClick: () => void; title: string; active?: boolean }) {
+  return (
+    <button type="button" title={title} onClick={onClick} className={`flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-bold text-white backdrop-blur-md transition-colors ${active ? "bg-[#5b8cff]" : "bg-black/55 hover:bg-black/75"}`}>
+      {children}
+    </button>
+  );
+}
+
+/**
+ * One 3D scene on the board. On the canvas it's a live picture glued to its card; explore it
+ * (double-click, or the Explore button) to orbit, zoom and pan, click objects to fly to
+ * them, drag them around, recolor, resize, animate, add or delete — saved to the board for
+ * everyone. Fullscreen fills the window (and is the default on phones).
+ */
 function LiveScene({ editor, shape, orbiting }: { editor: Editor; shape: ShapeView; orbiting: boolean }) {
-  const ref = useScreenRect(editor, shape.id);
+  const fullRef = useRef(false);
+  const ref = useScreenRect(editor, shape.id, fullRef);
   const spec = useMemo(() => parseScene(shape.data), [shape.data]);
+  const [selected, setSelected] = useState<number | undefined>(undefined);
+  const [dragging, setDragging] = useState<number | undefined>(undefined);
+  const [paused, setPaused] = useState(false);
+  const [spin, setSpin] = useState(false);
+  const [reset, setReset] = useState(0);
+  const [full, setFull] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const exit = (): void => {
+    useUiStore.getState().setOrbiting(undefined);
+    setSelected(undefined);
+    setFull(false);
+    setAdding(false);
+  };
+  // Phones explore fullscreen: the card is too small to touch.
+  useEffect(() => {
+    if (orbiting && window.innerWidth < 768) setFull(true);
+    if (!orbiting) {
+      setSelected(undefined);
+      setFull(false);
+    }
+  }, [orbiting]);
+
+  const save = (objects: readonly SceneObject[]): void => {
+    if (!spec) return;
+    editor.updateShapes([{ id: shape.id, patch: { data: serialize(spec, objects) } }], editor.beginGroup());
+  };
+  const patchSelected = (patch: Partial<SceneObject>): void => {
+    if (!spec || selected === undefined) return;
+    save(spec.objects.map((o, i) => (i === selected ? { ...o, ...patch } : o)));
+  };
+
+  // Keys while exploring: Esc steps out, Delete removes the selected object (not the card).
+  useEffect(() => {
+    if (!orbiting) return;
+    const onKey = (e: KeyboardEvent): void => {
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      if (e.key === "Escape") {
+        e.stopImmediatePropagation();
+        if (selected !== undefined) setSelected(undefined);
+        else exit();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && !typing) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        if (spec && selected !== undefined) {
+          save(spec.objects.filter((_, i) => i !== selected));
+          setSelected(undefined);
+        }
+      } else if (e.key === " " && !typing) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        setPaused((p) => !p);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [orbiting, selected, spec]);
+
   if (!spec) return null;
+  const explore: ExploreState = {
+    on: orbiting,
+    selected,
+    select: (i) => {
+      setSelected(i);
+      setAdding(false);
+    },
+    dragging,
+    startDrag: (i) => setDragging(i),
+    endDrag: (i, x, z) => {
+      setDragging(undefined);
+      const o = spec.objects[i];
+      if (!o) return;
+      const moved = Math.hypot(o.position[0] - x, o.position[2] - z) > 0.01;
+      if (!moved) return;
+      // Orbiting things keep circling: dragging sets how far out.
+      save(spec.objects.map((obj, k) => (k === i ? (obj.motion === "orbit" ? { ...obj, orbitRadius: Math.max(0.5, Math.hypot(x, z)), position: [x, obj.position[1], z] } : { ...obj, position: [x, obj.position[1], z] }) : obj)));
+    },
+  };
+  const sel = selected === undefined ? undefined : spec.objects[selected];
+
+  const ui = (
+    <>
+      <SceneView spec={spec} orbiting={orbiting} explore={explore} paused={paused} autoRotate={orbiting ? spin : true} reset={reset} />
+      {/* Title bar over the scene. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 bg-gradient-to-b from-black/60 to-transparent px-3 pb-8 pt-3">
+        <span className="truncate pt-1.5 text-[13px] font-bold text-white drop-shadow">{spec.title || shape.label || "3D scene"}</span>
+        {orbiting ? (
+          <div className="pointer-events-auto flex flex-wrap justify-end gap-1.5">
+            <ToolButton title={paused ? "Play (Space)" : "Pause (Space)"} onClick={() => setPaused(!paused)}>
+              {paused ? "▶" : "❚❚"}
+            </ToolButton>
+            <ToolButton title="Spin the view" active={spin} onClick={() => setSpin(!spin)}>
+              ⟳
+            </ToolButton>
+            <ToolButton title="Reset view" onClick={() => setReset((n) => n + 1)}>
+              ⌂
+            </ToolButton>
+            <ToolButton title="Add an object" active={adding} onClick={() => setAdding(!adding)}>
+              ＋ Add
+            </ToolButton>
+            <ToolButton title={full ? "Exit fullscreen" : "Fullscreen"} onClick={() => setFull(!full)}>
+              {full ? "⤡" : "⤢"}
+            </ToolButton>
+            <ToolButton title="Done (Esc)" onClick={exit}>
+              Done
+            </ToolButton>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => useUiStore.getState().setOrbiting(shape.id)}
+            className="pointer-events-auto shrink-0 rounded-full bg-white/90 px-3 py-1 text-[11px] font-bold text-[#0b0d14] shadow-lg backdrop-blur transition-transform hover:scale-105"
+          >
+            ✦ Explore in 3D
+          </button>
+        )}
+      </div>
+
+      {orbiting && adding && (
+        <div className="pointer-events-auto absolute right-3 top-14 grid w-[260px] grid-cols-3 gap-1.5 rounded-2xl border border-white/15 bg-black/70 p-2 backdrop-blur-xl">
+          {ADDABLE.map((a) => (
+            <button
+              key={a.shape}
+              type="button"
+              onClick={() => {
+                const angle = Math.random() * Math.PI * 2;
+                const d = sceneRadius(spec) * 0.35;
+                const next = parseScene(serialize(spec, [...spec.objects, { shape: a.shape, label: a.label, color: a.color, position: [Math.cos(angle) * d, a.size[1] / 2, Math.sin(angle) * d], size: a.size, motion: "none", ...a.extra } as unknown as SceneObject]));
+                if (next) {
+                  save(next.objects);
+                  setSelected(next.objects.length - 1);
+                }
+                setAdding(false);
+              }}
+              className="flex flex-col items-center gap-0.5 rounded-xl py-2 text-white hover:bg-white/10"
+            >
+              <span className="text-[20px]">{a.icon}</span>
+              <span className="text-[10px] font-semibold">{a.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {orbiting && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
+          {sel ? (
+            <div className="pointer-events-auto w-full max-w-[560px] rounded-2xl border border-white/15 bg-black/70 p-3 text-white shadow-2xl backdrop-blur-xl" onPointerDown={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: sel.color }} />
+                <input
+                  value={sel.label}
+                  placeholder={sel.shape}
+                  onChange={(e) => patchSelected({ label: e.target.value.slice(0, 40) })}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  className="min-w-0 flex-1 rounded-lg bg-white/10 px-2 py-1 text-[13px] font-bold outline-none focus:bg-white/15"
+                />
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold capitalize text-white/70">{sel.shape}</span>
+                <button type="button" title="Duplicate" onClick={() => {
+                  const copy = { ...sel, position: [sel.position[0] + 1.5, sel.position[1], sel.position[2] + 0.8] as const };
+                  const next = parseScene(serialize(spec, [...spec.objects, copy]));
+                  if (next) {
+                    save(next.objects);
+                    setSelected(next.objects.length - 1);
+                  }
+                }} className="rounded-lg px-2 py-1 text-[12px] font-bold hover:bg-white/10">⧉</button>
+                <button type="button" title="Delete (Del)" onClick={() => {
+                  save(spec.objects.filter((_, i) => i !== selected));
+                  setSelected(undefined);
+                }} className="rounded-lg px-2 py-1 text-[12px] font-bold text-[#ff8a80] hover:bg-white/10">🗑</button>
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                {SWATCHES.map((c) => (
+                  <button key={c} type="button" title={c} onClick={() => patchSelected({ color: c })} className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${sel.color === c ? "border-white" : "border-white/20"}`} style={{ background: c }} />
+                ))}
+                <input type="color" value={sel.color} onChange={(e) => patchSelected({ color: e.target.value })} className="h-6 w-8 cursor-pointer rounded border-0 bg-transparent" title="Any color" />
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-white/50">Size</span>
+                {[0.7, 0.9, 1.15, 1.4].map((k) => (
+                  <button key={k} type="button" onClick={() => patchSelected({ size: [sel.size[0] * k, sel.size[1] * k, sel.size[2] * k] })} className="rounded-lg bg-white/10 px-2 py-1 text-[11px] font-bold hover:bg-white/20">
+                    {k < 1 ? `−${Math.round((1 - k) * 100)}%` : `+${Math.round((k - 1) * 100)}%`}
+                  </button>
+                ))}
+                <span className="ml-2 mr-1 text-[10px] font-bold uppercase tracking-wider text-white/50">Glow</span>
+                <button type="button" onClick={() => patchSelected({ glow: !sel.glow })} className={`rounded-lg px-2 py-1 text-[11px] font-bold ${sel.glow ? "bg-[#ffb547] text-black" : "bg-white/10 hover:bg-white/20"}`}>
+                  {sel.glow ? "On" : "Off"}
+                </button>
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-white/50">Motion</span>
+                {MOTIONS.map((m) => (
+                  <button key={m} type="button" onClick={() => patchSelected({ motion: m, ...(m === "orbit" ? { orbitRadius: Math.max(1.5, Math.hypot(sel.position[0], sel.position[2])) } : {}) })} className={`rounded-lg px-2 py-1 text-[11px] font-bold capitalize ${sel.motion === m ? "bg-[#5b8cff]" : "bg-white/10 hover:bg-white/20"}`}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[10.5px] text-white/50">Drag it to move · Del to delete · Esc to deselect</p>
+            </div>
+          ) : (
+            <p className="rounded-full bg-black/60 px-3 py-1.5 text-center text-[11px] font-semibold text-white/85 backdrop-blur">
+              {window.matchMedia("(pointer: coarse)").matches ? "Tap an object to fly to it · drag to orbit · pinch to zoom · two fingers to pan" : "Click an object to fly to it · drag to orbit · right-drag to pan · scroll to zoom"}
+            </p>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  // Fullscreen is the same element pinned to the window (moving the 3D view elsewhere in
+  // the page would tear down its labels mid-render).
+  fullRef.current = full;
   return (
     <div
       ref={ref}
-      className={`absolute left-0 top-0 overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.35)] ${orbiting ? "pointer-events-auto ring-2 ring-accent" : "pointer-events-none"}`}
-      onPointerDown={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
+      className={`${full ? "fixed left-0 top-0 z-[70] bg-black" : "absolute left-0 top-0 shadow-[0_20px_60px_rgba(0,0,0,0.35)]"} overflow-hidden ${orbiting ? "pointer-events-auto" : "pointer-events-none"} ${orbiting && !full ? "ring-2 ring-accent" : ""}`}
+      onPointerDown={orbiting ? (e) => e.stopPropagation() : undefined}
+      onWheel={orbiting ? (e) => e.stopPropagation() : undefined}
     >
-      <SceneView spec={spec} orbiting={orbiting} />
-      {/* Title bar over the scene. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/55 to-transparent px-4 pb-6 pt-3">
-        <span className="truncate text-[13px] font-bold text-white drop-shadow">{spec.title || shape.label || "3D scene"}</span>
-        {!orbiting && <span className="shrink-0 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white/85 backdrop-blur">3D · double-click to explore</span>}
-      </div>
-      {orbiting && (
-        <button type="button" onClick={() => useUiStore.getState().setOrbiting(undefined)} className="absolute right-3 top-3 rounded-lg bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur">
-          Done (Esc)
-        </button>
-      )}
+      {ui}
     </div>
   );
 }
 
 /**
  * Live 3D for every 3D scene on screen (at most four at once: each is a WebGL context).
- * They float over their card on the canvas and follow it; double-click one to orbit.
+ * They float over their card on the canvas and follow it; double-click one to explore.
  */
 export function Scenes3D({ editor }: { editor: Editor | null }) {
   const version = useSceneVersion(editor, 300);
@@ -658,19 +1118,12 @@ export function Scenes3D({ editor }: { editor: Editor | null }) {
     const t = setInterval(() => setTick((n) => n + 1), 500);
     return () => clearInterval(t);
   }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") useUiStore.getState().setOrbiting(undefined);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
   if (!editor) return null;
   void version;
   const view = editor.renderer.visibleWorld;
   const live = editor.scene
     .ordered()
-    .filter((s) => s.kind === "scene3d" && s.x < view.x + view.w && s.x + s.w > view.x && s.y < view.y + view.h && s.y + s.h > view.y)
+    .filter((s) => s.kind === "scene3d" && (s.id === orbiting || (s.x < view.x + view.w && s.x + s.w > view.x && s.y < view.y + view.h && s.y + s.h > view.y)))
     .slice(-MAX_LIVE);
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">

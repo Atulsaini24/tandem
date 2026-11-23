@@ -139,7 +139,7 @@ function StudioPanel({ editor, id }: { editor: Editor; id: string }) {
   if (!shape || (kind !== "slide" && kind !== "chart")) return null;
   return (
     <motion.div
-      className="absolute inset-0 z-40 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      className="absolute inset-0 z-40 flex items-center justify-center bg-black/55 backdrop-blur-sm md:p-4"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -157,10 +157,10 @@ function StudioPanel({ editor, id }: { editor: Editor; id: string }) {
         animate={{ y: 0, scale: 1, opacity: 1 }}
         exit={{ y: 20, scale: 0.98, opacity: 0 }}
         transition={spring}
-        className="flex h-[min(860px,94vh)] w-[min(1500px,97vw)] overflow-hidden rounded-[28px] border border-edge bg-paper shadow-[0_40px_120px_rgba(0,0,0,0.45)]"
+        className="flex h-[100dvh] w-screen flex-col overflow-hidden border-edge bg-paper shadow-[0_40px_120px_rgba(0,0,0,0.45)] md:h-[min(860px,94vh)] md:w-[min(1500px,97vw)] md:flex-row md:rounded-[28px] md:border"
       >
         <Preview kind={kind} draft={draft} replay={replay} onReplay={() => setReplay((n) => n + 1)} />
-        <div className="flex w-[440px] shrink-0 flex-col border-l border-edge">
+        <div className="flex min-h-0 w-full flex-1 flex-col border-t border-edge md:w-[440px] md:flex-none md:shrink-0 md:border-l md:border-t-0">
           <header className="flex items-center gap-3 border-b border-edge px-5 py-3.5">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-[#5b8cff] to-[#b36bff] text-white">
               <Icon name={kind === "slide" ? "slides" : "chart"} className="h-4 w-4" />
@@ -201,14 +201,14 @@ function Preview({ kind, draft, replay, onReplay }: { kind: string; draft: Raw; 
     return spec ? chartSvg(spec, 860, 600, CHART_THEMES[dark ? "dark" : "light"]) : "";
   }, [draft, kind, dark]);
   return (
-    <div className="relative flex min-w-0 flex-1 flex-col bg-[radial-gradient(circle_at_30%_20%,rgba(91,140,255,0.12),transparent_60%),radial-gradient(circle,var(--color-line)_1px,transparent_1px)] [background-size:auto,18px_18px]">
-      <div className="flex items-center justify-between px-6 pt-5">
+    <div className="relative flex h-[34%] min-w-0 shrink-0 flex-col md:h-auto md:flex-1 md:shrink bg-[radial-gradient(circle_at_30%_20%,rgba(91,140,255,0.12),transparent_60%),radial-gradient(circle,var(--color-line)_1px,transparent_1px)] [background-size:auto,18px_18px]">
+      <div className="flex items-center justify-between px-4 pt-3 md:px-6 md:pt-5">
         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Live preview</p>
         <button type="button" onClick={onReplay} className="flex h-8 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12px] font-semibold text-ink hover:bg-hover">
           <Icon name="sparkle" className="h-3.5 w-3.5 text-accent" /> Replay animation
         </button>
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+      <div className="flex min-h-0 flex-1 items-center justify-center p-3 md:p-6">
         {svg ? (
           <div key={replay} className={`${playing ? "reveal" : ""} showcase-art w-full overflow-hidden rounded-2xl shadow-[0_30px_80px_rgba(0,0,0,0.35)]`} style={{ aspectRatio: kind === "slide" ? "960 / 540" : "860 / 600", maxHeight: "100%", ["--base" as string]: "100ms" }} dangerouslySetInnerHTML={{ __html: svg }} />
         ) : (

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CHART_THEMES, CHART_TYPES, chartSvg, parseChart } from "./charts";
 import { autoKpis, parseTable } from "./chart-data";
+import { getPath, setPath } from "./field-path";
 import { parseSlide, SLIDE_THEMES, slideSvg, type SlideSpec } from "./slides";
 import { TEMPLATES } from "./templates";
 
@@ -184,6 +185,38 @@ describe("template library", () => {
         if (s.props.kind === "slide") expect(parseSlide(s.props.data), t.id).toBeDefined();
         if (s.props.kind === "chart") expect(parseChart(s.props.data), t.id).toBeDefined();
       }
+    }
+  });
+});
+
+describe("editing slide text on the canvas", () => {
+  it("reads and writes nested fields without touching the rest", () => {
+    const spec = { title: "Old", items: [{ title: "A", text: "a" }, { title: "B" }], columns: [{ title: "Old way", items: ["slow"] }] };
+    expect(getPath(spec, "items.1.title")).toBe("B");
+    expect(getPath(spec, "items.5.title")).toBe("");
+    const next = setPath(spec, "items.1.text", "new text");
+    expect(getPath(next, "items.1.text")).toBe("new text");
+    expect(getPath(next, "items.0.text")).toBe("a");
+    expect(getPath(spec, "items.1.text")).toBe(""); // the original is unchanged
+    expect(getPath(setPath(spec, "columns.0.items.0", "fast"), "columns.0.items.0")).toBe("fast");
+    expect(getPath(setPath(spec, "quote.author", "Ana"), "quote.author")).toBe("Ana");
+  });
+
+  it("tags every editable text in every layout with a field that exists in the spec", () => {
+    const items = [
+      { icon: "", title: "One", text: "first", value: "Week 1" },
+      { icon: "", title: "Two", text: "second", value: "Week 2" },
+      { icon: "", title: "Three", text: "third", value: "Week 3" },
+      { icon: "", title: "Four", text: "fourth", value: "Week 4" },
+    ];
+    const layouts = ["title", "agenda", "cards", "timeline", "process", "team", "pricing", "matrix", "closing", "statement"];
+    for (const layout of layouts) {
+      const raw = { layout, theme: "midnight", kicker: "K", title: "Hello there", subtitle: "Sub", items, axes: ["X", "Y"], index: 1, total: 4 };
+      const spec = parseSlide(JSON.stringify(raw));
+      if (!spec) throw new Error(layout);
+      const fields = [...slideSvg(spec, 960, 540).matchAll(/data-f="([^"]+)"/g)].map((m) => m[1] ?? "");
+      expect(fields.length, layout).toBeGreaterThan(0);
+      for (const f of fields) expect(getPath(raw, f), `${layout}: ${f}`).not.toBe("");
     }
   });
 });
