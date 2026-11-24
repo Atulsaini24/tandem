@@ -64,3 +64,5 @@ export {
   type DeckSlide,
   SCENE_MODELS,
 } from "./creative.js";
+export { VISION_SCHEMA, buildVisionMessages, cleanVision, isVisionModel, runVision, type VisionItem, type VisionResult } from "./vision.js";
+export { buildIllustrationMessages, runIllustration, ILLUSTRATION_SCHEMA, runSuggest, SUGGEST_SCHEMA, runVoiceCommand, VOICE_ACTIONS, runMeeting, type Suggestion, type VoiceAction, type MeetingUpdate } from "./assist2.js";

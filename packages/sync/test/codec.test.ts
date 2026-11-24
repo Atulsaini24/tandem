@@ -126,6 +126,7 @@ describe("messages", () => {
     const client: ClientMessage[] = [
       { type: "hello", version: 3, docId: "doc-1", clientId: "abc", since: 123_456, token: "t.sig" },
       { type: "push", clientSeq: 9, delta: new Uint8Array([1, 2, 3]) },
+      { type: "signal", to: "peer-2", payload: new TextEncoder().encode('{"t":"sdp"}') },
     ];
     const server: ServerMessage[] = [
       { type: "welcome", head: 77, readOnly: false },
@@ -133,6 +134,7 @@ describe("messages", () => {
       { type: "delta", serverSeq: 78, delta: new Uint8Array([4, 5]) },
       { type: "ack", clientSeq: 9, serverSeq: 79 },
       { type: "error", fatal: true, message: "nope ✋" },
+      { type: "signal", from: "peer-1", payload: new Uint8Array([7, 8, 9]) },
     ];
     for (const m of client) expect(decodeClientMessage(encodeClientMessage(m))).toEqual(m);
     for (const m of server) expect(decodeServerMessage(encodeServerMessage(m))).toEqual(m);

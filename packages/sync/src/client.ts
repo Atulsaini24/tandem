@@ -64,6 +64,8 @@ export interface SyncClientOptions {
   readonly onState?: (state: SyncState) => void;
   /** The server durably stored every local delta up to `clientSeq`. */
   readonly onAck?: (clientSeq: number, cursor: number) => void;
+  /** A point-to-point message from another client (WebRTC call setup). */
+  readonly onSignal?: (from: string, payload: Uint8Array) => void;
   /** Another client's presence payload, or null when they leave. */
   readonly onPresence?: (clientId: string, payload: Uint8Array | null) => void;
   /**
@@ -215,6 +217,13 @@ export class SyncClient {
     });
   }
 
+  /** Send opaque bytes to one other client in this document. Dropped while offline. */
+  signal(to: string, payload: Uint8Array): boolean {
+    if (!this.#socketOpen) return false;
+    this.#send(encodeClientMessage({ type: "signal", to, payload }));
+    return true;
+  }
+
   /** Replace this client's presence. Sent now if connected, and again after every reconnect. */
   setPresence(payload: Uint8Array): void {
     this.#presence = payload;
@@ -308,6 +317,9 @@ export class SyncClient {
           this.#emit();
         }
         return;
+      case "signal":
+        this.#options.onSignal?.(message.from, message.payload);
+        break;
       case "presence":
         this.#options.onPresence?.(message.clientId, message.payload);
         return;

@@ -77,3 +77,10 @@ the current milestone passes its gate.
 - **3D rotation and height:** objects move along the ground; a rotate/raise gizmo would finish
   the set.
 - **Layers panel:** rename, lock and hide per layer; drag to reorder.
+- **Bigger calls:** the mesh is fine for ~6 people; beyond that, route media through an SFU.
+  Also screen sharing (a second track on the same connections).
+- **Editable PowerPoint:** export slide text as real PowerPoint text boxes, not pictures.
+- **Photo → board arrows:** the vision model finds notes reliably but misses many arrows;
+  detect lines from the image directly and snap them to the nearest notes.
+- **Mention notifications when away:** mentions only toast while you're on the board.
+

@@ -5,12 +5,14 @@
 export type Primitive =
   | "box" | "sphere" | "cylinder" | "cone" | "torus" | "plane" | "ring"
   // Ready-made models, built from several meshes (see ui/Scenes3D.tsx).
-  | "planet" | "tree" | "pine" | "building" | "house" | "rocket" | "cloud" | "mountain" | "car" | "person" | "server" | "crystal";
+  | "planet" | "tree" | "pine" | "building" | "house" | "rocket" | "cloud" | "mountain" | "car" | "person" | "server" | "crystal"
+  // A real 3D model loaded from an https .glb/.gltf link.
+  | "model";
 export type Motion = "none" | "spin" | "orbit" | "bob" | "pulse" | "float";
 export type Backdrop = "space" | "studio" | "sky" | "sunset" | "night";
 export type Material = "matte" | "plastic" | "metal" | "glass";
 
-export const PRIMITIVES: readonly Primitive[] = ["box", "sphere", "cylinder", "cone", "torus", "plane", "ring", "planet", "tree", "pine", "building", "house", "rocket", "cloud", "mountain", "car", "person", "server", "crystal"];
+export const PRIMITIVES: readonly Primitive[] = ["box", "sphere", "cylinder", "cone", "torus", "plane", "ring", "planet", "tree", "pine", "building", "house", "rocket", "cloud", "mountain", "car", "person", "server", "crystal", "model"];
 const MOTIONS: readonly Motion[] = ["none", "spin", "orbit", "bob", "pulse", "float"];
 const BACKDROPS: readonly Backdrop[] = ["space", "studio", "sky", "sunset", "night"];
 const MATERIALS: readonly Material[] = ["matte", "plastic", "metal", "glass"];
@@ -30,6 +32,10 @@ export interface SceneObject {
   readonly material: Material;
   /** Planets: a Saturn-like ring. */
   readonly rings: boolean;
+  /** Raised above the ground by this much (set in Explore mode). */
+  readonly lift: number;
+  /** For "model": the https link of a .glb/.gltf file. */
+  readonly url: string;
 }
 
 export interface SceneSpec {
@@ -77,6 +83,7 @@ export function parseScene(data: string | undefined): SceneSpec | undefined {
     if (typeof o !== "object" || o === null) return [];
     const x = o as Record<string, unknown>;
     const shape = PRIMITIVES.includes(x.shape as Primitive) ? (x.shape as Primitive) : "box";
+    if (shape === "model" && !(typeof x.url === "string" && x.url.startsWith("https://"))) return [];
     let motion = MOTIONS.includes(x.motion as Motion) ? (x.motion as Motion) : "none";
     // Light sources (a sun, a lamp) sit still and spin: models often make them orbit too.
     if (x.glow === true && motion === "orbit") motion = "spin";
@@ -94,6 +101,8 @@ export function parseScene(data: string | undefined): SceneSpec | undefined {
         glow: x.glow === true,
         material: MATERIALS.includes(x.material as Material) ? (x.material as Material) : "matte",
         rings: x.rings === true,
+        lift: num(x.lift, 0, 0, 20),
+        url: typeof x.url === "string" && /^https:\/\/[^\s"'<>]+\.(glb|gltf)(\?[^\s"'<>]*)?$/i.test(x.url) ? x.url.slice(0, 500) : "",
       },
     ];
   });
@@ -149,7 +158,7 @@ export function compose(input: readonly SceneObject[], backdrop: Backdrop): Scen
   const flies = (o: Obj): boolean => o.shape === "cloud" || o.motion === "float" || (o.glow && o.shape !== "building" && o.shape !== "house" && o.shape !== "server");
   const grounded = objs.filter((o) => !FLAT.includes(o.shape) && !flies(o));
   const tallest = Math.max(1, ...grounded.map(heightOf));
-  for (const o of grounded) o.position = [o.position[0], heightOf(o) / 2, o.position[2]];
+  for (const o of grounded) o.position = [o.position[0], heightOf(o) / 2 + o.lift, o.position[2]];
   // 3. Nothing inside anything else (moving things are placed after).
   separate(grounded.filter((o) => o.motion !== "orbit"));
   const extent = Math.max(2, ...grounded.filter((o) => o.motion !== "orbit").map((o) => Math.hypot(o.position[0], o.position[2]) + footprint(o)));
@@ -170,7 +179,7 @@ export function compose(input: readonly SceneObject[], backdrop: Backdrop): Scen
     ground.size = [Math.max(ground.size[0], reach * 2.4), 0.1, Math.max(ground.size[2], reach * 2.4)];
   } else {
     const color = backdrop === "night" ? "#1d2230" : backdrop === "studio" ? "#2a2d35" : backdrop === "sunset" ? "#6b5a4a" : "#5f8f52";
-    objs.unshift({ shape: "plane", label: "", color, position: [0, 0, 0], size: [reach * 2.4, 0.1, reach * 2.4], rotation: [0, 0, 0], motion: "none", orbitRadius: 0, speed: 1, glow: false, material: "matte", rings: false });
+    objs.unshift({ shape: "plane", label: "", color, position: [0, 0, 0], size: [reach * 2.4, 0.1, reach * 2.4], rotation: [0, 0, 0], motion: "none", orbitRadius: 0, speed: 1, glow: false, material: "matte", rings: false, lift: 0, url: "" });
   }
   return objs;
 }

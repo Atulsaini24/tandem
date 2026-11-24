@@ -1,4 +1,5 @@
 import gsap from "gsap";
+import { installApp, useCanInstall } from "../pwa";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { SplitText } from "gsap/SplitText";
 import Lenis from "lenis";
@@ -88,7 +89,8 @@ function Nav() {
           <a href="#engine" className="transition-colors hover:text-white">Engine</a>
           <button type="button" onClick={() => startDemo("kanban")} className="transition-colors hover:text-white">Live demo</button>
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <InstallButton />
           <Magnetic href="/boards" className="relative flex h-10 items-center gap-2 overflow-hidden rounded-full bg-white px-5 text-[13px] font-bold text-[#05060a]">
             Open app <Icon name="back2" className="h-3.5 w-3.5 rotate-180" />
           </Magnetic>
@@ -458,5 +460,16 @@ export default function Home() {
         </div>
       </footer>
     </div>
+  );
+}
+
+/** Shown only when the browser offers to install Tandem as an app. */
+function InstallButton() {
+  const can = useCanInstall();
+  if (!can) return null;
+  return (
+    <button type="button" onClick={() => void installApp()} className="flex h-10 items-center gap-2 rounded-full border border-white/20 px-4 text-[13px] font-bold text-white hover:bg-white/10">
+      ⬇ Install app
+    </button>
   );
 }

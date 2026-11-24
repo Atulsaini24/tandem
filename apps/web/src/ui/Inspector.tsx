@@ -151,7 +151,7 @@ function DesignTab({ editor }: { editor: Editor }) {
         </Section>
       )}
 
-      {one && one.kind !== "path" && one.kind !== "chart" && one.kind !== "scene3d" && one.kind !== "slide" && (
+      {one && one.kind !== "path" && one.kind !== "chart" && one.kind !== "scene3d" && one.kind !== "slide" && one.kind !== "art" && one.kind !== "embed" && one.kind !== "poll" && (
         <Section title="Text">
           <textarea
             value={text}

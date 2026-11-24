@@ -101,6 +101,8 @@ export type AiRequest =
 export interface ChatMessage {
   readonly role: "system" | "user";
   readonly content: string;
+  /** Base64 images (no data: prefix), for vision models. */
+  readonly images?: readonly string[];
 }
 
 /** Trim, collapse whitespace, strip control characters, cap length (by code point). */

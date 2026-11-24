@@ -2,6 +2,8 @@ import type { ShapeView } from "@canvas/doc";
 import { FRAME_TITLE_H, arrowEnds, boundsOf, center, pathPoints, visualBounds, type Lookup, type Rect } from "./geometry";
 import { CHART_THEMES, chartSvg, parseChart, sceneCardSvg } from "./charts";
 import { parseSlide, slideSvg } from "./slides";
+import { artSvg, parseArt } from "./art";
+import { embedSvg, parseEmbed, parsePoll, pollSvg } from "./widgets";
 import { displayFill, hex, inkColor, labelColor, type CanvasTheme } from "./theme";
 
 /**
@@ -108,10 +110,13 @@ function shapeSvg(s: ShapeView, lookup: Lookup, theme: CanvasTheme, withText: bo
     }
     case "chart":
     case "slide":
+    case "art":
+    case "embed":
+    case "poll":
     case "scene3d": {
       const w = Math.max(40, Math.round(s.w));
       const h = Math.max(30, Math.round(s.h));
-      const inner = designSvg(s.kind, s.data, s.label, w, h, CHART_THEMES[theme.name]);
+      const inner = designSvg(s.kind, s.data, s.label, w, h, CHART_THEMES[theme.name], s.voters);
       // Nest the chart's own SVG, positioned and sized like the shape.
       return `<g${rot}>${inner.replace("<svg ", `<svg x="${n(s.x)}" y="${n(s.y)}" `)}</g>`;
     }
@@ -183,7 +188,19 @@ export function download(blob: Blob, filename: string): void {
 export const safeFilename = (title: string): string => title.replace(/[^\p{L}\p{N}\- ]+/gu, "").trim().replace(/\s+/g, "-").slice(0, 60) || "board";
 
 /** The SVG design for a chart, slide or 3D card (shared by the renderer and export). */
-export function designSvg(kind: string, data: string | undefined, label: string | undefined, w: number, h: number, chartTheme: (typeof CHART_THEMES)["light"]): string {
+export function designSvg(kind: string, data: string | undefined, label: string | undefined, w: number, h: number, chartTheme: (typeof CHART_THEMES)["light"], voters?: readonly string[]): string {
+  if (kind === "art") {
+    const spec = parseArt(data);
+    return spec ? artSvg(spec, w, h) : sceneCardSvg("Illustration", w, h);
+  }
+  if (kind === "embed") {
+    const spec = parseEmbed(data);
+    return spec ? embedSvg(spec, w, h) : sceneCardSvg("Embed", w, h);
+  }
+  if (kind === "poll") {
+    const spec = parsePoll(data);
+    return spec ? pollSvg(spec, voters, w, h) : sceneCardSvg("Poll", w, h);
+  }
   if (kind === "chart") {
     const spec = parseChart(data);
     return spec ? chartSvg(spec, w, h, chartTheme) : sceneCardSvg("Chart: no data", w, h);

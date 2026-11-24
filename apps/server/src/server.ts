@@ -73,6 +73,8 @@ export interface SyncServer {
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 /** Presence is a name, a color, a point and a capped selection: a few KB at most. */
 const MAX_PRESENCE_BYTES = 16 * 1024;
+/** An SDP offer is a few KB; leave room for big ones (many codecs, many candidates). */
+const MAX_SIGNAL_BYTES = 64 * 1024;
 
 class Connection implements RoomClient {
   room: Room | undefined;
@@ -82,6 +84,7 @@ class Connection implements RoomClient {
   readonly pushes: TokenBucket;
   readonly presenceBucket: TokenBucket;
   readonly historyBucket: TokenBucket;
+  readonly signalBucket: TokenBucket;
   /** Pushes waiting for rate-limit tokens, processed in arrival order. */
   pushChain: Promise<void> = Promise.resolve();
   queuedPushes = 0;
@@ -93,6 +96,8 @@ class Connection implements RoomClient {
     this.pushes = new TokenBucket(limits.pushesPerSec, limits.pushBurst);
     this.presenceBucket = new TokenBucket(limits.presencePerSec, limits.presencePerSec);
     this.historyBucket = new TokenBucket(limits.historyPerSec, limits.historyPerSec);
+    // Call setup is bursty (an offer plus a dozen ICE candidates) but rare.
+    this.signalBucket = new TokenBucket(limits.presencePerSec, limits.presencePerSec * 4);
   }
 
   send(message: ServerMessage): void {
@@ -230,6 +235,11 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
         for (const client of room.clients) client.sendRaw(relay);
         return;
       }
+      case "signal": {
+        const relay = encodeServerMessage({ type: "signal", from: message.from, payload: message.payload });
+        for (const client of room.clients) if (client.clientId === message.to) client.sendRaw(relay);
+        return;
+      }
       case "who":
         for (const client of room.clients) {
           if (client.presence) bus?.publish(room.docId, { kind: "presence", clientId: client.clientId, payload: client.presence });
@@ -315,6 +325,27 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
     const relay = encodeServerMessage({ type: "presence", clientId: conn.clientId, payload });
     for (const other of room.clients) if (other !== conn) other.sendRaw(relay);
     bus?.publish(room.docId, { kind: "presence", clientId: conn.clientId, payload });
+  }
+
+  /**
+   * Signals go to exactly one client: on this instance if it's here, else over the bus.
+   * Like presence they're opaque to the server, never stored, and dropped if nobody has
+   * that id. The sender can't pick an arbitrary "from": it's always its own id.
+   */
+  function signal(conn: Connection, to: string, payload: Uint8Array): void {
+    const room = conn.room;
+    if (!room) return conn.reject("signal before hello");
+    if (payload.length > MAX_SIGNAL_BYTES) return conn.reject("signal too large");
+    if (!conn.signalBucket.take()) return;
+    const relay = encodeServerMessage({ type: "signal", from: conn.clientId, payload });
+    let local = false;
+    for (const other of room.clients) {
+      if (other !== conn && other.clientId === to) {
+        other.sendRaw(relay);
+        local = true;
+      }
+    }
+    if (!local) bus?.publish(room.docId, { kind: "signal", from: conn.clientId, to, payload });
   }
 
   function leave(conn: Connection): void {
@@ -464,6 +495,7 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
       if (message.type === "hello") hello(conn, message);
       else if (message.type === "push") push(conn, message);
       else if (message.type === "history") history(conn, message);
+      else if (message.type === "signal") signal(conn, message.to, message.payload);
       else presence(conn, message.payload);
     });
     socket.on("close", () => leave(conn));

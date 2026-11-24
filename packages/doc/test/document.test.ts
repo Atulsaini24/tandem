@@ -202,6 +202,26 @@ describe("team rituals", () => {
     expect(alice.vote("missing", "alice", true)).toEqual({ tree: [], props: [] });
   });
 
+  it("comment replies from different people never overwrite each other", () => {
+    const alice = new CanvasDocument("alice");
+    const bob = new CanvasDocument("bob");
+    alice.createShapes([{ id: "c", props: { ...rect(), kind: "comment", label: "Ship it?" } }]);
+    bob.merge(alice.state);
+    // Both reply at the same moment, offline from each other.
+    const a = alice.reply("c", "001-alice", '{"t":"yes"}');
+    const b = bob.reply("c", "001-bob", '{"t":"not yet"}');
+    alice.merge(b);
+    bob.merge(a);
+    expect(alice.shape("c")?.replies?.map((r) => r.key)).toEqual(["001-alice", "001-bob"]);
+    expect(bob.shape("c")).toEqual(alice.shape("c"));
+    // Deleting is writing "", which hides the reply everywhere.
+    bob.merge(alice.reply("c", "001-alice", ""));
+    expect(bob.shape("c")?.replies?.map((r) => r.key)).toEqual(["001-bob"]);
+    expect(() => alice.reply("c", "bad key!", "x")).toThrow(RangeError);
+    expect(() => alice.reply("c", "k", "x".repeat(5000))).toThrow(RangeError);
+    expect(alice.reply("missing", "k", "x")).toEqual({ tree: [], props: [] });
+  });
+
   it("the shared timer syncs through board meta", () => {
     const alice = new CanvasDocument("alice");
     const bob = new CanvasDocument("bob");

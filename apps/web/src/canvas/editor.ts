@@ -12,6 +12,7 @@ import { loadIdentity } from "./identity";
 import { Peers } from "./peers";
 import { Renderer } from "./renderer";
 import { Scene } from "./scene";
+import { applyPendingMerge, seedBranch } from "./branch";
 import { templateById, type TemplateId, TEMPLATES, INK, NOTE_COLORS } from "./templates";
 import { CANVAS_THEMES } from "./theme";
 import type { Point } from "./viewport";
@@ -258,6 +259,11 @@ export class Editor {
   // --- creating ---------------------------------------------------------------
 
   /** Create shapes optimistically; returns their ids. One undo step per call (or `group`). */
+  /** Create shapes with the given ids (branches and merges keep ids so changes line up). */
+  createWithIds(shapes: ReadonlyArray<{ id: NodeId; props: ShapeProps }>, group?: number): NodeId[] {
+    return this.#create(shapes, group, true);
+  }
+
   #create(shapes: ReadonlyArray<{ id?: NodeId; props: ShapeProps }>, group?: number, animate = false): NodeId[] {
     if (this.locked || shapes.length === 0) return [];
     this.#flush();
@@ -357,6 +363,21 @@ export class Editor {
     if (shape.kind === "chart") {
       this.select([id]);
       useUiStore.getState().setStudio(id);
+      return;
+    }
+    if (shape.kind === "embed") {
+      // A page goes live (clickable); a code block opens for editing.
+      this.select([id]);
+      useUiStore.getState().setEmbedLive(id);
+      return;
+    }
+    if (shape.kind === "poll") {
+      this.select([id]);
+      useUiStore.getState().setPollOpen(id);
+      return;
+    }
+    if (shape.kind === "art") {
+      this.select([id]);
       return;
     }
     this.select([id]);
@@ -696,6 +717,11 @@ export class Editor {
 
   // --- team rituals ------------------------------------------------------------------
 
+  /** Who I am on this board (name, color and a stable id). */
+  get me(): { readonly id: string; readonly name: string; readonly color: number } {
+    return this.#me;
+  }
+
   /** This browser's voter key. */
   get voterId(): string {
     return this.#me.id;
@@ -756,6 +782,12 @@ export class Editor {
   setSpotlight(on: boolean): void {
     useUiStore.getState().setSpotlight(on);
     if (on) useUiStore.getState().setNotice("Spotlight on: everyone is following your view");
+    this.#schedulePresence();
+  }
+
+  /** Tell the room I'm in (or out of) the video call: the others connect to me. */
+  setInCall(on: boolean): void {
+    useUiStore.getState().setCall(on);
     this.#schedulePresence();
   }
 
@@ -1109,6 +1141,7 @@ export class Editor {
           ...(this.#reaction ? { reaction: this.#reaction } : {}),
           ...(ui.spotlight ? { spotlight: true } : {}),
           ...(ui.laser ? { laser: true } : {}),
+          ...(ui.call ? { call: true } : {}),
         },
       });
     }, PRESENCE_INTERVAL_MS);
@@ -1163,6 +1196,11 @@ export class Editor {
         } else if (event.shapes > 0) {
           setTimeout(() => this.zoomToFit(1), 0);
         }
+        // Branches: a new branch starts as a copy; a board may have a merge waiting.
+        setTimeout(() => {
+          if (this.scene.size === 0) seedBranch(this);
+          applyPendingMerge(this);
+        }, 400);
         upsertBoard(this.docId, {});
         return;
       }

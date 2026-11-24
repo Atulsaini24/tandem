@@ -1,0 +1,25 @@
+{
+  "name": "Tandem",
+  "short_name": "Tandem",
+  "description": "A real-time, offline-first canvas with a local AI: boards, charts, 3D scenes and slide decks.",
+  "id": "/",
+  "start_url": "/boards",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "background_color": "#111317",
+  "theme_color": "#111317",
+  "categories": ["productivity", "business", "education"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "New board", "url": "/boards?new=1", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "All boards", "url": "/boards", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ],
+  "file_handlers": [
+    { "action": "/boards", "accept": { "text/csv": [".csv"], "image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"] } }
+  ]
+}

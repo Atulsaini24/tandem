@@ -99,6 +99,8 @@ export default function Boards() {
   const previews = useMemo(() => new Map(TEMPLATES.map((t) => [t.id, templatePreview(t, dark)])), [dark]);
   useEffect(() => {
     document.title = "Your boards · Tandem";
+    // The installed app's "New board" shortcut.
+    if (new URLSearchParams(location.search).get("new") === "1") openNew();
   }, []);
   const shown = boards
     .filter((b) => b.title.toLowerCase().includes(query.toLowerCase()))

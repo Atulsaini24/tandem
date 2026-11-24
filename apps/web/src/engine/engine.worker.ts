@@ -70,6 +70,8 @@ async function edit(replica: OfflineReplica, command: EditCommand): Promise<DocD
       return doc.setMeta(command.meta);
     case "vote":
       return doc.vote(command.id, command.voter, command.on);
+    case "reply":
+      return doc.reply(command.id, command.key, command.value);
     case "undo":
     case "redo": {
       const result = command.type === "undo" ? doc.undo() : doc.redo();
@@ -107,6 +109,7 @@ async function open(url: string, docId: string, online: boolean, token: string |
     onRemote: (delta) => scope.postMessage(patchFor(replica.doc, lastSeq, delta, performance.now(), true)),
     onState: (state) => scope.postMessage({ type: "sync", ...state }),
     onPresence: (clientId, presence) => scope.postMessage({ type: "presence", clientId, presence }),
+    onSignal: (from, data) => scope.postMessage({ type: "signal", from, data }),
   });
 
   const shapes = replica.doc.shapes();
@@ -118,6 +121,7 @@ async function open(url: string, docId: string, online: boolean, token: string |
     shapes: shapes.length,
     pending: replica.restored.pending,
     persistent: storage !== undefined,
+    clientId: replica.replicaId,
   });
   scope.postMessage({ type: "sync", status: "offline", pending: replica.sync.pending, cursor: replica.sync.cursor, readOnly: false });
   if (online) replica.start();
@@ -138,6 +142,9 @@ scope.addEventListener("message", (event) => {
       return;
     case "presence":
       void ready.then((replica) => replica?.setPresence(command.presence));
+      return;
+    case "signal":
+      void ready.then((replica) => replica?.signal(command.to, command.data));
       return;
     case "history":
       void ready.then(async (replica) => {
@@ -166,7 +173,7 @@ scope.addEventListener("message", (event) => {
             scope.postMessage(patchFor(replica.doc, command_.seq, delta, started, false));
             replica.commit(delta);
           }
-          if (command_.type !== "undo" && command_.type !== "redo" && command_.type !== "restore" && command_.type !== "title" && command_.type !== "meta" && command_.type !== "vote") {
+          if (command_.type !== "undo" && command_.type !== "redo" && command_.type !== "restore" && command_.type !== "title" && command_.type !== "meta" && command_.type !== "vote" && command_.type !== "reply") {
             scope.postMessage({ type: "undoState", canUndo: replica.doc.canUndo, canRedo: replica.doc.canRedo });
           }
         } catch (error) {

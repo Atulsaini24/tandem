@@ -92,8 +92,9 @@ export const SLIDE_SCHEMA = {
     quote: { type: "object", properties: { text: { type: "string" }, author: { type: "string" } } },
     columns: { type: "array", items: { type: "object", properties: { title: { type: "string" }, items: { type: "array", items: { type: "string" } } } } },
     axes: { type: "array", items: { type: "string" } },
+    notes: { type: "string" },
   },
-  required: ["layout", "kicker", "title"],
+  required: ["layout", "kicker", "title", "notes"],
 } as const;
 
 export const DECK_SCHEMA = {
@@ -160,7 +161,8 @@ const LAYOUT_GUIDE = `Layouts and what to fill:
 - "statement": one bold sentence as "title" with the key words wrapped in *asterisks*; optional "subtitle".
 - "quote": "quote" = {"text": a memorable line, "author": who said it}.
 - "closing": last slide: the ask or call to action as "title", a "subtitle", and "items" = 2-3 next steps (icon + title).
-Use concrete names, numbers, dates and examples from the topic. No markdown, no placeholders like "Lorem" or "X%".`;
+Use concrete names, numbers, dates and examples from the topic. No markdown, no placeholders like "Lorem" or "X%".
+"notes": 2-3 sentences the presenter says on this slide (speaker notes), conversational and specific.`;
 
 const THEME_GUIDE = `Pick a "theme": midnight (tech, bold), aurora (AI, climate), sunset (consumer, warm), paper (business, clean), ocean (health, finance), noir (luxury, premium), neon (gaming, events, youth), forest (sustainability, food), royal (education, culture), mono (minimal, design).`;
 

@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { offerPhoto } from "../canvas/features";
 import { listModels, type ModelInfo } from "../canvas/ai-models";
 import type { Editor } from "../canvas/editor";
 import { useUiStore } from "../state/ui-store";
 import { Icon, Kbd, MOD, spring, type IconName } from "./kit";
 
-export type AiMode = "board" | "flowchart" | "mindmap" | "chart" | "scene" | "deck" | "insight";
+export type AiMode = "board" | "flowchart" | "mindmap" | "chart" | "scene" | "deck" | "art" | "photo" | "review" | "voice" | "insight";
 
 const MODES: ReadonlyArray<{ id: AiMode; label: string; icon: IconName; placeholder: string; action: string; examples: readonly string[]; blurb: string }> = [
   {
@@ -61,6 +62,42 @@ const MODES: ReadonlyArray<{ id: AiMode; label: string; icon: IconName; placehol
     placeholder: "e.g. Pitch deck for a fitness app",
     action: "Create deck",
     examples: ["Pitch deck for a fitness app startup", "Explain how CRDTs work", "Quarterly business review"],
+  },
+  {
+    id: "art",
+    label: "Draw",
+    icon: "pen",
+    blurb: "A vector illustration — an icon, logo, mascot or little scene — drawn as clean shapes.",
+    placeholder: "e.g. A friendly robot mascot waving",
+    action: "Draw it",
+    examples: ["A friendly robot mascot waving", "Logo for a coffee shop called Bean There", "A cozy house on a hill at sunset"],
+  },
+  {
+    id: "photo",
+    label: "Photo",
+    icon: "download",
+    blurb: "Photo of a whiteboard, sticky notes or a sketch → editable notes, shapes and arrows. Or just drop or paste a photo onto the board.",
+    placeholder: "Optional hint, e.g. our sprint retro",
+    action: "Choose a photo",
+    examples: ["Our sprint retro", "A hand-drawn login flowchart", "Brainstorm sticky notes"],
+  },
+  {
+    id: "review",
+    label: "Review",
+    icon: "eye",
+    blurb: "Your AI teammate reviews the board and leaves suggestion cards — missing steps, risks, ideas — to accept or dismiss.",
+    placeholder: "Optional focus, e.g. launch risks",
+    action: "Review the board",
+    examples: ["What are we missing?", "Biggest risks", "How could this be faster?"],
+  },
+  {
+    id: "voice",
+    label: "Voice",
+    icon: "chat",
+    blurb: "Say a command (“add three notes about pricing”, “make a chart of our sales”) — or let it take meeting notes while you talk.",
+    placeholder: "Nothing to type — press the button and speak",
+    action: "Say a command",
+    examples: ["Add four notes about launch risks", "Make a pie chart of our marketing budget", "Present"],
   },
   {
     id: "insight",
@@ -133,6 +170,7 @@ export function AiAssistant({ editor }: { editor: Editor | null }) {
   const elapsed = useElapsed(ai.startedAt, running);
   const organizable = editor ? editor.ai.organizable().length : 0;
   const current = MODES.find((m) => m.id === mode) ?? MODES[0];
+  const photoInput = useRef<HTMLInputElement>(null);
   void selectionSize;
 
   const run = (): void => {
@@ -142,6 +180,10 @@ export function AiAssistant({ editor }: { editor: Editor | null }) {
     else if (mode === "chart") void editor.ai.chart(prompt);
     else if (mode === "scene") void editor.ai.scene(prompt);
     else if (mode === "deck") void editor.ai.deck(prompt);
+    else if (mode === "art") void editor.ai.illustration(prompt);
+    else if (mode === "photo") photoInput.current?.click();
+    else if (mode === "review") void editor.ai.suggest(prompt);
+    else if (mode === "voice") useUiStore.getState().setVoice({ mode: "command", heard: "" });
     else void editor.ai.insight(prompt);
   };
   if (!current) return null;
@@ -203,6 +245,23 @@ export function AiAssistant({ editor }: { editor: Editor | null }) {
               <Icon name={current.icon} className="h-4 w-4" />
               {current.action}
             </motion.button>
+            {mode === "voice" && (
+              <motion.button type="button" whileTap={{ scale: 0.96 }} onClick={() => useUiStore.getState().setVoice({ mode: "meeting", heard: "" })} className="h-10 rounded-xl border border-line px-3 text-[12px] font-semibold text-ink hover:bg-hover">
+                🎙️ Meeting notes
+              </motion.button>
+            )}
+            <input
+              ref={photoInput}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void offerPhoto(file);
+                e.target.value = "";
+              }}
+            />
             {mode === "board" && organizable >= 2 && (
               <motion.button type="button" whileTap={{ scale: 0.96 }} onClick={() => void editor?.ai.organize(prompt)} className="h-10 rounded-xl border border-line px-3 text-[12px] font-semibold text-ink hover:bg-hover">
                 Organize {organizable}

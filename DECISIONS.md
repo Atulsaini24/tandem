@@ -692,3 +692,53 @@ the homepage gallery centres the panel in focus at any width. The canvas underst
 touch: two fingers pinch to zoom and pan, one finger on empty space pans like a map, and a
 double-tap acts as a double-click.
 
+## D079 — Photos become boards by asking a vision model, then checking its colors
+A local vision model (gemma3:4b) is asked for every note, box, arrow and group with its
+position in percent and a schema-constrained JSON reply; `cleanVision` validates all of it
+(bounded counts, de-duplicated ids, links only between known items). Small models misjudge
+colors and call sticky notes "text", so the board samples the photo's pixels inside each
+box, compares them with the paper/board color around it, and picks the nearest note color.
+That made colors exact where the model alone got them mostly wrong.
+
+## D080 — Illustrations are art-directed, not drawn
+A 4B model can't place coordinates well enough to draw: freehand SVG took minutes and came
+out as noise. Instead the model picks a background, palette, caption and a handful of icons
+from a hand-drawn kit of 30, and `composeArt` does the layout (biggest item as the centered
+hero, sky things up top, props on the ground, duplicates dropped except decor). ~35 s, and
+it always looks finished. Paths and colors from the model are still whitelisted.
+
+## D081 — Branches merge by diff against a remembered base
+Branching copies the board and stores the base snapshot locally. Merging computes, per
+shape and per property, what the branch changed relative to that base, and applies only
+that to the original. Edits others made to the original meanwhile survive; when both
+changed the same property, the branch wins (it's the explicit action). It needs no server
+support and works offline.
+
+## D082 — Calls are a mesh over a new SIGNAL message
+Protocol v4 adds SIGNAL: opaque bytes from one client to one other client in the same
+document, stamped by the server with the sender's id (so it can't be spoofed), routed
+locally or over the bus to another instance, rate-limited, never stored. WebRTC setup rides
+on it; media goes browser to browser. Who's in the call is a presence flag, so there's no
+join handshake, and the smaller client id makes the offer so two peers never collide. A
+mesh suits the handful of people around one board; an SFU would be the next step for big
+calls. No STUN/TURN servers are contacted unless configured.
+
+## D083 — Comment replies are separate keys
+A thread stored as one JSON value would lose a reply whenever two people answered at once
+(last writer wins). Each reply is its own property (`r:<time>-<author>`), like votes, so
+concurrent replies all land and a delete is writing "". Replies aren't in undo: you delete
+your message, you don't undo someone else's. @mentions match known names at word starts.
+
+## D084 — Decks leave the board as images
+PowerPoint and video exports render each frame exactly as it looks on the board (the same
+SVG the canvas uses) at 1920 px, then pack them: one picture per slide plus speaker notes
+for PowerPoint (pptxgenjs, loaded on demand), a gentle push-in and crossfade per slide for
+video (MediaRecorder). Editable PowerPoint text would need every slide layout re-expressed
+in PowerPoint's model; fidelity was the priority.
+
+## D085 — The app installs, and the service worker stays out of the way
+A manifest, icons and a service worker make Tandem installable. The worker only touches
+same-origin GETs (never the sync socket or the local AI): pages are network-first with the
+cached shell as fallback, hashed assets cache-first. It's registered only in production
+builds, so dev's live reload never fights a cache.
+

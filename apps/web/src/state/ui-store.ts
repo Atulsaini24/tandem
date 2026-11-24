@@ -1,3 +1,4 @@
+import type { PreparedImage } from "../canvas/image";
 import { create } from "zustand";
 import type { NodeId } from "@canvas/doc";
 import type { SyncStatus } from "@canvas/sync";
@@ -21,7 +22,7 @@ export interface TeamUiState {
 
 export interface AiUiState {
   readonly status: "idle" | "thinking" | "writing" | "done" | "error" | "cancelled";
-  readonly mode?: "generate" | "organize" | "diagram" | "insight" | "chart" | "scene" | "deck";
+  readonly mode?: "generate" | "organize" | "diagram" | "insight" | "chart" | "scene" | "deck" | "photo" | "voice" | "illustration" | "suggest";
   /** Where the last finished result is on the board (for "Show result"). */
   readonly result?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /** Insight mode: the summary, shown in the panel too. */
@@ -107,6 +108,11 @@ interface UiState {
   /** Present mode: the frame ids in slide order and which one is showing. */
   readonly presenting: { readonly slides: readonly NodeId[]; readonly index: number } | undefined;
   readonly laser: boolean;
+  /** The comments inbox (all threads on the board) is open. */
+  readonly commentsOpen: boolean;
+  setCommentsOpen(open: boolean): void;
+  /** I've joined this board's video call. */
+  readonly call: boolean;
   /** I'm asking everyone to follow me. */
   readonly spotlight: boolean;
   /** Someone else is spotlighting (their client id), and we're following them. */
@@ -118,6 +124,24 @@ interface UiState {
   readonly team: TeamUiState | undefined;
   /** The 3D scene currently taking mouse input (drag to orbit). */
   readonly orbiting: string | undefined;
+  /** A photo waiting to be turned into a board (Photo → board). */
+  readonly photoOffer: PreparedImage | undefined;
+  setPhotoOffer(image: PreparedImage | undefined): void;
+  /** The embed whose page is live and clickable. */
+  readonly embedLive: string | undefined;
+  setEmbedLive(id: string | undefined): void;
+  /** The poll showing its vote buttons. */
+  readonly pollOpen: string | undefined;
+  setPollOpen(id: string | undefined): void;
+  /** Voice: listening for a command, or taking meeting notes. */
+  readonly voice: { readonly mode: "off" | "command" | "meeting"; readonly heard: string };
+  setVoice(patch: Partial<{ mode: "off" | "command" | "meeting"; heard: string }>): void;
+  /** AI teammate suggestions waiting for accept/dismiss: shape id → kind. */
+  readonly suggestions: Readonly<Record<string, string>>;
+  setSuggestions(next: Readonly<Record<string, string>>): void;
+  /** The presenter view (notes, timer, next slide) is open in its own window. */
+  readonly presenterOpen: boolean;
+  setPresenterOpen(open: boolean): void;
   /** The template library is open. */
   readonly galleryOpen: boolean;
   setGalleryOpen(open: boolean): void;
@@ -137,6 +161,7 @@ interface UiState {
   setTimer(timer: { end: number; total: number; paused: number }): void;
   setPresenting(presenting: { slides: readonly NodeId[]; index: number } | undefined): void;
   setLaser(laser: boolean): void;
+  setCall(call: boolean): void;
   setSpotlight(spotlight: boolean): void;
   setSpotlightBy(clientId: string | undefined): void;
   setRadial(radial: { x: number; y: number; target: NodeId | undefined } | undefined): void;
@@ -206,12 +231,27 @@ export const useUiStore = create<UiState>()((set) => ({
   timer: { end: 0, total: 0, paused: 0 },
   presenting: undefined,
   laser: false,
+  call: false,
+  commentsOpen: false,
+  setCommentsOpen: (commentsOpen) => set({ commentsOpen }),
   spotlight: false,
   spotlightBy: undefined,
   radial: undefined,
   crowd: false,
   team: undefined,
   orbiting: undefined,
+  photoOffer: undefined,
+  setPhotoOffer: (photoOffer) => set({ photoOffer }),
+  embedLive: undefined,
+  setEmbedLive: (embedLive) => set({ embedLive }),
+  pollOpen: undefined,
+  setPollOpen: (pollOpen) => set({ pollOpen }),
+  voice: { mode: "off", heard: "" },
+  setVoice: (patch) => set((st) => ({ voice: { ...st.voice, ...patch } })),
+  suggestions: {},
+  setSuggestions: (suggestions) => set({ suggestions }),
+  presenterOpen: false,
+  setPresenterOpen: (presenterOpen) => set({ presenterOpen }),
   galleryOpen: false,
   setGalleryOpen: (galleryOpen) => set({ galleryOpen }),
   slideEdit: undefined,
@@ -237,6 +277,7 @@ export const useUiStore = create<UiState>()((set) => ({
   setTimer: (timer) => set({ timer }),
   setPresenting: (presenting) => set({ presenting }),
   setLaser: (laser) => set({ laser }),
+  setCall: (call) => set({ call }),
   setSpotlight: (spotlight) => set({ spotlight }),
   setSpotlightBy: (spotlightBy) => set({ spotlightBy }),
   setRadial: (radial) => set({ radial }),

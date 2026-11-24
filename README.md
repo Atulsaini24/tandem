@@ -42,6 +42,17 @@ links, and an AI that runs on your own machine.
 | **Insert** | Any of 14 slide layouts, 9 chart types or 6 3D scenes in one click, no AI needed |
 | **3D explore** | Double-click a scene (or "Explore in 3D"): orbit, zoom, pan, click objects to fly to them, drag to move, recolor, resize, change motion and glow, add or delete objects, pause, fullscreen; changes are saved for everyone |
 | **Edit on canvas** | Double-click a slide and click any title, card, number or quote to type right there |
+| **Photo → board** | Snap or drop a photo of a whiteboard or sticky notes: a local vision model (gemma3) reads every note, box and arrow, and the board rebuilds it, with each note's real paper color sampled from the photo |
+| **Voice** | 🎙️ Say a command ("make a flowchart of our hiring process", "tidy up", "present") or turn on **meeting notes**: it listens, and keeps a frame of notes, decisions and action items (with owners) up to date |
+| **Branches** | 🌿 Branch a board to try an idea safely, **compare** side by side with the original, and **merge** back: only what the branch changed is applied, so edits made meanwhile survive |
+| **AI teammate & tidy** | "Review" asks the AI for what's missing, risky or duplicated; its cards land next to the notes they're about, with accept/dismiss. **Tidy up** lays out a messy selection (layered if it has connectors, a grid otherwise) |
+| **Illustrations** | "Draw" makes a vector illustration: the AI art-directs (background, palette, composition, caption) from a hand-drawn kit of 30 icons, so it always looks finished |
+| **Files, embeds & polls** | Drop or paste a **CSV** for a ready chart (type, title, unit and KPIs guessed); paste a **YouTube, Figma or web link** to embed it live; **code blocks** with highlighting; **live polls** that everyone votes on |
+| **3D, more** | Import any **.glb / .gltf model** by link, set each object's **height and turn**, and view the scene in **VR or AR** on a headset or phone that supports WebXR |
+| **Decks, more** | **Presenter view** in a second window (current and next slide, speaker notes, timer, controls); speaker notes in Studio, written by the AI for its decks; export to **PowerPoint** (with notes) or a **video** |
+| **Calls** | 📹 **Video calls on the board**: camera bubbles you can drag, a glow on whoever's talking, mute and camera toggles; peer-to-peer (WebRTC), the server only relays the setup |
+| **Comments, more** | **Threads** with replies, **@mentions** with autocomplete and a toast when you're mentioned, resolve/reopen, and a **Comments** inbox (open, @me, resolved) |
+| **Install** | An installable **app** (PWA): its own window and icon, opens offline, "New board" shortcut |
 | **Mobile** | Phone layout with drawers, a scrolling dock and a floating AI button; pinch to zoom, two-finger pan, double-tap to edit |
 
 ## How it fits together
@@ -117,6 +128,11 @@ board in two windows to collaborate. Try: go offline (click "Synced" next to the
 edit in both, refresh the offline one, go back online. Press `/` to chat at your cursor,
 `1`–`6` to react, click the other person's avatar to follow them, `⌘K` for every command.
 Open **History** (clock icon in the dock) and drag the slider.
+
+Video calls work between browsers that can reach each other directly (same network, or
+localhost). Across the internet, list STUN/TURN servers in `VITE_ICE_SERVERS` (a JSON array
+of `RTCIceServer`s); none are contacted by default. Photo → board needs a vision model:
+`ollama pull gemma3:4b`.
 
 Without `DATABASE_URL` the server keeps documents in memory. Configuration: see
 [`.env.example`](.env.example) and [`apps/server/src/main.ts`](apps/server/src/main.ts).

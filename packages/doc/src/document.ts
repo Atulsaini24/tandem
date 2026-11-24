@@ -29,8 +29,8 @@ import {
  * It also keeps this replica's undo/redo history (see "Selective undo" below).
  */
 
-export type ShapeKind = "rect" | "ellipse" | "diamond" | "text" | "frame" | "arrow" | "path" | "comment" | "chart" | "scene3d" | "slide";
-export const SHAPE_KINDS: readonly ShapeKind[] = ["rect", "ellipse", "diamond", "text", "frame", "arrow", "path", "comment", "chart", "scene3d", "slide"];
+export type ShapeKind = "rect" | "ellipse" | "diamond" | "text" | "frame" | "arrow" | "path" | "comment" | "chart" | "scene3d" | "slide" | "art" | "embed" | "poll";
+export const SHAPE_KINDS: readonly ShapeKind[] = ["rect", "ellipse", "diamond", "text", "frame", "arrow", "path", "comment", "chart", "scene3d", "slide", "art", "embed", "poll"];
 
 export interface ShapeProps {
   readonly kind: ShapeKind;
@@ -62,6 +62,11 @@ export interface ShapeView extends ShapeProps {
   readonly id: NodeId;
   /** Dot votes: who voted for this shape (read-only view; see CanvasDocument.vote). */
   readonly voters?: readonly string[];
+  /**
+   * Comment threads: each reply is its own property (see CanvasDocument.reply), so two
+   * people replying at once both land. Sorted by key, which starts with a timestamp.
+   */
+  readonly replies?: readonly { readonly key: string; readonly value: string }[];
 }
 
 /** Board-wide settings that sync like any property (see CanvasDocument.meta). */
@@ -76,6 +81,9 @@ export interface BoardMeta {
 }
 const META_KEYS = ["title", "timerEnd", "timerTotal", "timerPaused"] as const;
 export const VOTE_PREFIX = "v:";
+export const REPLY_PREFIX = "r:";
+export const MAX_REPLY_KEY = 40;
+export const MAX_REPLY_VALUE = 4000;
 
 export type PropValue = string | number;
 export type PropsDelta = ReadonlyArray<readonly [NodeId, LWWMapState<PropValue>]>;
@@ -188,7 +196,11 @@ function readShape(id: NodeId, props: LWWMap<PropValue>): ShapeView | undefined 
   const [x, y, w, h, fill] = (["x", "y", "w", "h", "fill"] as const).map((key) => props.get(key));
   if (typeof kind !== "string" || !(SHAPE_KINDS as readonly string[]).includes(kind)) return undefined;
   const voters: string[] = [];
-  for (const [key, value] of props.entries()) if (key.startsWith(VOTE_PREFIX) && value === 1) voters.push(key.slice(VOTE_PREFIX.length));
+  const replies: { key: string; value: string }[] = [];
+  for (const [key, value] of props.entries()) {
+    if (key.startsWith(VOTE_PREFIX) && value === 1) voters.push(key.slice(VOTE_PREFIX.length));
+    else if (key.startsWith(REPLY_PREFIX) && typeof value === "string" && value !== "" && value.length <= MAX_REPLY_VALUE) replies.push({ key: key.slice(REPLY_PREFIX.length), value });
+  }
   if (typeof x !== "number" || typeof y !== "number") return undefined;
   if (typeof w !== "number" || typeof h !== "number" || typeof fill !== "number") return undefined;
   const view: Record<string, PropValue> = { id, kind, x, y, w, h, fill };
@@ -197,6 +209,7 @@ function readShape(id: NodeId, props: LWWMap<PropValue>): ShapeView | undefined 
     if (value !== undefined && value !== empty && typeof value === typeof empty) view[key] = value;
   }
   if (voters.length > 0) (view as Record<string, unknown>).voters = voters.sort();
+  if (replies.length > 0) (view as Record<string, unknown>).replies = replies.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   return view as unknown as ShapeView;
 }
 
@@ -313,6 +326,18 @@ export class CanvasDocument {
     const clean = Array.from(voter).slice(0, 40).join("");
     if (!clean) throw new RangeError("voter must be a non-empty string");
     return { tree: [], props: [[id, this.#propsOf(id).set(`${VOTE_PREFIX}${clean}`, on ? 1 : 0)]] };
+  }
+
+  /**
+   * Add, edit or (with "") remove one reply in a shape's thread. Each reply is its own
+   * last-writer-wins key, so concurrent replies never overwrite each other. Like votes,
+   * replies aren't part of undo: you delete a reply, you don't "undo" someone's message.
+   */
+  reply(id: NodeId, key: string, value: string): DocDelta {
+    if (!this.#props.has(id) || id === META_ID) return EMPTY_DELTA;
+    if (!key || key.length > MAX_REPLY_KEY || !/^[\w.-]+$/.test(key)) throw new RangeError("bad reply key");
+    if (value.length > MAX_REPLY_VALUE) throw new RangeError("reply too long");
+    return { tree: [], props: [[id, this.#propsOf(id).set(`${REPLY_PREFIX}${key}`, value)]] };
   }
 
   /** Only the ops a given replica authored (for re-seeding a server that lost data). */

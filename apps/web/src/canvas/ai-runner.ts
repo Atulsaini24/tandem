@@ -1,4 +1,4 @@
-import type { NodeId, ShapeProps } from "@canvas/doc";
+import type { NodeId, ShapeProps, ShapeView } from "@canvas/doc";
 import {
   COLORS,
   OllamaError,
@@ -9,6 +9,12 @@ import {
   buildSceneMessages,
   layoutDiagram,
   runDeckFast,
+  runVision,
+  runIllustration,
+  runSuggest,
+  runVoiceCommand,
+  runMeeting,
+  isVisionModel,
   buildSlideRewriteMessages,
   buildChartRewriteMessages,
   SLIDE_SCHEMA,
@@ -28,11 +34,14 @@ import {
   type Rect,
 } from "@canvas/ai";
 import { useUiStore } from "../state/ui-store";
-import { chatOptions } from "./ai-models";
+import { chatOptions, listModels } from "./ai-models";
+import { nearestNote, sampleColors, type PreparedImage } from "./image";
 import { parseChart } from "./charts";
 import { parseScene } from "./scenes";
 import { hashTheme, SLIDE_H, SLIDE_THEMES, SLIDE_W, type SlideThemeName } from "./slides";
-import { boundsOf, visualBounds } from "./geometry";
+import { boundsOf, intersects, visualBounds } from "./geometry";
+import { parseArt } from "./art";
+import { tidy } from "./features";
 import { INK, NOTE_COLORS } from "./templates";
 import type { Editor } from "./editor";
 
@@ -213,6 +222,260 @@ export class AiRunner {
     } finally {
       this.#abort = undefined;
     }
+  }
+
+  /**
+   * Photo → board: a vision model reads a photo of a whiteboard, sticky notes or a sketch,
+   * and the notes, shapes and arrows are rebuilt as real, editable shapes laid out like the
+   * photo. Uses the chosen model if it can see images, else the best installed one that can.
+   */
+  async photo(image: PreparedImage, hint = ""): Promise<void> {
+    if (this.#abort) return;
+    const abort = new AbortController();
+    this.#abort = abort;
+    const editor = this.#editor;
+    useUiStore.getState().setAi({ status: "thinking", mode: "photo", items: 0, startedAt: Date.now(), message: "Reading the photo…", tokensPerSecond: 0 });
+    try {
+      const chosen = useUiStore.getState().aiModel;
+      const model = isVisionModel(chosen) ? chosen : (await listModels()).find((m) => isVisionModel(m.name))?.name;
+      if (!model) throw new OllamaError("Photo → board needs a model that can see images. Install one with: ollama pull gemma3:4b");
+      const result = await runVision(image.base64, hint, { ...chatOptions(model), signal: abort.signal });
+      if (result.items.length === 0) throw new OllamaError("The model couldn't find any notes or shapes in this photo. Try a sharper, closer photo.");
+      // The board keeps the photo's proportions.
+      const W = 1800;
+      const H = Math.round((W * image.height) / image.width);
+      const origin = this.#freeSpot(W, H + 120);
+      const group = editor.beginGroup();
+      const fill: Record<string, number> = { yellow: NOTE_COLORS.yellow, pink: NOTE_COLORS.pink, green: NOTE_COLORS.green, blue: NOTE_COLORS.blue, purple: NOTE_COLORS.purple, orange: NOTE_COLORS.orange, white: 0xffffff };
+      const ids = new Map<string, NodeId>();
+      editor.aiCreate({ kind: "text", x: origin.x, y: origin.y, w: 900, h: 48, fill: INK, label: result.title }, group);
+      // The photo itself says which items are coloured paper, and what colour: trust it over the model.
+      const samples = await sampleColors(image.dataUrl, result.items);
+      const look = new Map(result.items.map((it, i) => [it.id, samples[i]]));
+      // Groups first, so they sit behind what's inside them.
+      const ordered = [...result.items].sort((a, b) => (a.kind === "group" ? 0 : 1) - (b.kind === "group" ? 0 : 1));
+      for (const raw of ordered) {
+        const sample = look.get(raw.id);
+        const it = sample?.paper && (raw.kind === "text" || raw.kind === "note" || raw.kind === "box") ? { ...raw, kind: "note" as const } : raw;
+        const paperFill = sample?.paper ? nearestNote(sample.rgb, NOTE_COLORS) : undefined;
+        const x = origin.x + (it.x / 100) * W;
+        const y = origin.y + 80 + (it.y / 100) * H;
+        const w = Math.max(it.kind === "text" ? 160 : 140, (it.w / 100) * W);
+        const h = Math.max(it.kind === "text" ? 40 : 70, (it.h / 100) * H);
+        const kind = it.kind === "group" ? "frame" : it.kind === "ellipse" ? "ellipse" : it.kind === "diamond" ? "diamond" : it.kind === "text" ? "text" : "rect";
+        const id = editor.aiCreate({ kind, x, y, w, h, fill: kind === "text" ? INK : kind === "frame" ? 0x2f63ff : (paperFill ?? fill[it.color] ?? NOTE_COLORS.yellow), label: it.text }, group);
+        ids.set(it.id, id);
+        if (kind === "frame") editor.engine.send({ type: "back", seq: editor.engine.nextSeq(), ids: [id], group });
+      }
+      for (const link of result.links) {
+        const from = ids.get(link.from);
+        const to = ids.get(link.to);
+        if (from && to) editor.aiCreate({ kind: "arrow", x: 0, y: 0, w: 1, h: 1, fill: INK, points: "0,0 1,1", from, to, ...(link.label ? { label: link.label } : {}) }, group);
+      }
+      useUiStore.getState().setAi({ status: "done", items: result.items.length, finishedAt: Date.now(), message: `${result.items.length} items and ${result.links.length} arrows from the photo (read by ${model})`, ...(result.tokensPerSecond === undefined ? {} : { tokensPerSecond: result.tokensPerSecond }) });
+      this.#show({ x: origin.x, y: origin.y - 20, w: W, h: H + 120 });
+    } catch (error) {
+      this.#fail(error, abort);
+    } finally {
+      this.#abort = undefined;
+    }
+  }
+
+  /** A vector illustration (icon, logo, scene) drawn by the AI as clean shapes. */
+  async illustration(prompt: string): Promise<void> {
+    if (this.#abort) return;
+    const abort = new AbortController();
+    this.#abort = abort;
+    const editor = this.#editor;
+    useUiStore.getState().setAi({ status: "thinking", mode: "illustration", items: 0, startedAt: Date.now(), message: "Sketching…", tokensPerSecond: 0 });
+    try {
+      const { value, tokensPerSecond } = await runIllustration(prompt, llm(abort.signal));
+      const data = JSON.stringify(value);
+      const spec = parseArt(data);
+      if (!spec) throw new OllamaError("The model didn't draw anything usable. Try a simpler subject, like \"a friendly robot icon\".");
+      const at = this.#freeSpot(520, 520);
+      const id = editor.aiCreate({ kind: "art", x: at.x, y: at.y, w: 520, h: 520, fill: 0xffffff, label: spec.title || prompt.slice(0, 60), data }, editor.beginGroup());
+      useUiStore.getState().reveal([id]);
+      useUiStore.getState().setAi({ status: "done", items: spec.shapes.length, finishedAt: Date.now(), message: `Illustration · ${spec.scene ? spec.scene.items.length : spec.shapes.length} elements`, ...(tokensPerSecond === undefined ? {} : { tokensPerSecond }) });
+      this.#show({ x: at.x, y: at.y - 20, w: 520, h: 560 });
+    } catch (error) {
+      this.#fail(error, abort);
+    } finally {
+      this.#abort = undefined;
+    }
+  }
+
+  /**
+   * The AI teammate reads the board and leaves suggestion cards next to the notes they're
+   * about: missing steps, risks, ideas, questions, duplicates. Each can be accepted (it
+   * becomes a normal note) or dismissed.
+   */
+  async suggest(focus = ""): Promise<number> {
+    if (this.#abort) return 0;
+    const editor = this.#editor;
+    const shapes = editor.scene.ordered().filter((s) => s.label?.trim() && s.kind !== "frame" && s.kind !== "arrow" && !useUiStore.getState().suggestions[s.id]);
+    if (shapes.length < 2) {
+      useUiStore.getState().setAi({ status: "error", mode: "suggest", items: 0, message: "Add a few notes first — the AI teammate reviews what's on the board." });
+      return 0;
+    }
+    const abort = new AbortController();
+    this.#abort = abort;
+    useUiStore.getState().setAi({ status: "thinking", mode: "suggest", items: 0, startedAt: Date.now(), message: "Reviewing the board…", tokensPerSecond: 0 });
+    try {
+      const found = await runSuggest(shapes.map((s) => s.label ?? ""), focus, llm(abort.signal));
+      const group = editor.beginGroup();
+      const fills: Record<string, number> = { missing: NOTE_COLORS.blue, risk: NOTE_COLORS.pink, idea: NOTE_COLORS.green, question: NOTE_COLORS.orange, duplicate: NOTE_COLORS.purple };
+      const icons: Record<string, string> = { missing: "➕", risk: "⚠️", idea: "💡", question: "❓", duplicate: "♊" };
+      const pending: Record<string, string> = { ...useUiStore.getState().suggestions };
+      const taken: Rect[] = [];
+      for (const s of found) {
+        const near = bestMatch(shapes, s.near);
+        // Beside the note it's about, stepping down past anything already there.
+        let x = near ? near.x + near.w + 40 : this.#freeSpot(260, 140).x;
+        let y = near ? near.y : this.#freeSpot(260, 140).y;
+        const w = 260;
+        const h = 130;
+        for (let i = 0; i < 12; i += 1) {
+          const box = { x, y, w, h };
+          const hit = editor.scene.ordered().some((o) => o.kind !== "frame" && o.kind !== "arrow" && overlaps(box, o)) || taken.some((t) => overlaps(box, t));
+          if (!hit) break;
+          y += h + 20;
+          if (i === 6) x += w + 30;
+        }
+        taken.push({ x, y, w, h });
+        const id = editor.aiCreate({ kind: "rect", x, y, w, h, fill: fills[s.kind] ?? NOTE_COLORS.yellow, label: `${icons[s.kind] ?? "✨"} ${s.text}` }, group);
+        pending[id] = s.kind;
+      }
+      useUiStore.getState().setSuggestions(pending);
+      useUiStore.getState().setAi({ status: "done", items: found.length, finishedAt: Date.now(), message: `${found.length} suggestions — accept ✓ or dismiss ✕ on each card` });
+      const all = boundsOf(taken);
+      if (all) this.#show(all);
+      return found.length;
+    } catch (error) {
+      this.#fail(error, abort);
+      return 0;
+    } finally {
+      this.#abort = undefined;
+    }
+  }
+
+  /** Understand a spoken command and do it. Returns what was understood. */
+  async voiceCommand(transcript: string): Promise<string> {
+    if (this.#abort) return "Busy — wait for the current AI run.";
+    const abort = new AbortController();
+    this.#abort = abort;
+    const editor = this.#editor;
+    let result: Awaited<ReturnType<typeof runVoiceCommand>>;
+    useUiStore.getState().setAi({ status: "thinking", mode: "voice", items: 0, startedAt: Date.now(), message: `“${transcript}”`, tokensPerSecond: 0 });
+    try {
+      result = await runVoiceCommand(transcript, llm(abort.signal));
+    } catch (error) {
+      this.#fail(error, abort);
+      return "Couldn't understand that.";
+    } finally {
+      this.#abort = undefined;
+    }
+    useUiStore.getState().setAi({ status: "idle", items: 0 });
+    const { action, prompt, notes } = result;
+    switch (action) {
+      case "notes": {
+        const list = notes.length > 0 ? notes : [prompt];
+        const at = this.#freeSpot(Math.min(4, list.length) * 300, Math.ceil(list.length / 4) * 180);
+        const group = editor.beginGroup();
+        const ids = list.map((t, i) => editor.aiCreate({ kind: "rect", x: at.x + (i % 4) * 300, y: at.y + Math.floor(i / 4) * 180, w: 270, h: 150, fill: [NOTE_COLORS.yellow, NOTE_COLORS.blue, NOTE_COLORS.green, NOTE_COLORS.pink][i % 4] ?? NOTE_COLORS.yellow, label: t }, group));
+        useUiStore.getState().reveal([]);
+        this.#show({ x: at.x, y: at.y - 20, w: Math.min(4, list.length) * 300, h: Math.ceil(list.length / 4) * 180 + 20 });
+        editor.select(ids);
+        return `Added ${list.length} note${list.length === 1 ? "" : "s"}`;
+      }
+      case "plan":
+        void this.generate(prompt);
+        return `Planning: ${prompt}`;
+      case "flowchart":
+      case "mindmap":
+        void this.diagram(action, prompt);
+        return `Drawing a ${action === "mindmap" ? "mind map" : "flowchart"}: ${prompt}`;
+      case "chart":
+        void this.chart(prompt);
+        return `Making a chart: ${prompt}`;
+      case "scene":
+        void this.scene(prompt);
+        return `Building a 3D scene: ${prompt}`;
+      case "deck":
+        void this.deck(prompt);
+        return `Writing a deck: ${prompt}`;
+      case "illustration":
+        void this.illustration(prompt);
+        return `Drawing: ${prompt}`;
+      case "summarize":
+        void this.insight(prompt);
+        return "Summarizing the board";
+      case "suggest":
+        void this.suggest(prompt);
+        return "Reviewing the board";
+      case "tidy":
+        return `Tidied ${tidy(editor)} shapes`;
+      case "present":
+        editor.startPresenting();
+        return "Presenting";
+      default:
+        return `Didn't catch a command in “${transcript}”`;
+    }
+  }
+
+  /**
+   * Meeting mode: each chunk of what was said becomes notes, decisions and action items in
+   * a "Meeting notes" frame with three columns that fill in as the meeting goes.
+   */
+  async meetingChunk(transcript: string): Promise<number> {
+    if (this.#abort || !transcript.trim()) return 0;
+    const editor = this.#editor;
+    const abort = new AbortController();
+    this.#abort = abort;
+    try {
+      const frame = this.#meetingFrame();
+      const taken = editor.scene.ordered().filter((s) => s.kind === "rect" && s.label && within(s, frame)).map((s) => s.label ?? "");
+      const update = await runMeeting(transcript, taken, llm(abort.signal));
+      const group = editor.beginGroup();
+      const cols: Array<[number, string[]]> = [
+        [0, update.notes.map((n) => `📝 ${n}`)],
+        [1, update.decisions.map((d) => `✅ ${d}`)],
+        [2, update.actions.map((a) => `🎯 ${a.task}${a.owner ? `\n\n👤 ${a.owner}` : ""}${a.due ? ` · 📅 ${a.due}` : ""}`)],
+      ];
+      let added = 0;
+      for (const [col, items] of cols) {
+        const colX = frame.x + 30 + col * 380;
+        const inCol = editor.scene.ordered().filter((s) => s.kind === "rect" && within(s, frame) && s.x >= colX - 5 && s.x < colX + 340);
+        let y = Math.max(frame.y + 90, ...inCol.map((s) => s.y + s.h + 16));
+        for (const text of items) {
+          const id = editor.aiCreate({ kind: "rect", x: colX, y, w: 340, h: 110, fill: [NOTE_COLORS.yellow, NOTE_COLORS.green, NOTE_COLORS.blue][col] ?? NOTE_COLORS.yellow, label: text }, group);
+          useUiStore.getState().reveal([id]);
+          y += 126;
+          added += 1;
+        }
+        if (y > frame.y + frame.h - 40) editor.updateShapes([{ id: frame.id, patch: { h: y - frame.y + 60 } }], group);
+      }
+      return added;
+    } catch {
+      return 0;
+    } finally {
+      this.#abort = undefined;
+    }
+  }
+
+  /** The meeting notes frame (made on first use). */
+  #meetingFrame(): ShapeView {
+    const editor = this.#editor;
+    const existing = editor.scene.ordered().find((s) => s.kind === "frame" && s.label?.startsWith("🎙️ Meeting notes"));
+    if (existing) return existing;
+    const at = this.#freeSpot(1170, 640);
+    const group = editor.beginGroup();
+    const date = new Date().toLocaleDateString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    const id = editor.aiCreate({ kind: "frame", x: at.x, y: at.y, w: 1170, h: 640, fill: 0x7b55e7, label: `🎙️ Meeting notes — ${date}` }, group);
+    editor.engine.send({ type: "back", seq: editor.engine.nextSeq(), ids: [id], group });
+    ["Notes", "Decisions", "Action items"].forEach((t, i) => editor.aiCreate({ kind: "text", x: at.x + 30 + i * 380, y: at.y + 30, w: 340, h: 40, fill: INK, label: t }, group));
+    this.#show({ x: at.x, y: at.y - 30, w: 1170, h: 680 });
+    return editor.scene.get(id) ?? { id, kind: "frame", x: at.x, y: at.y, w: 1170, h: 640, fill: 0x7b55e7 };
   }
 
   #fail(error: unknown, abort: AbortController): void {
@@ -591,4 +854,27 @@ function richColumn(origin: Point, column: number): Rect {
 function richItem(origin: Point, column: number, index: number): Rect {
   const c = richColumn(origin, column);
   return { x: c.x + RICH.pad, y: c.y + RICH.head - 30 + index * (RICH.cardH + RICH.gap), w: RICH.width, h: RICH.cardH };
+}
+
+const overlaps = (a: Rect, b: Rect): boolean => intersects(a, b);
+const within = (s: Rect, frame: Rect): boolean => s.x >= frame.x && s.y >= frame.y && s.x + s.w <= frame.x + frame.w + 1 && s.y + s.h <= frame.y + frame.h + 400;
+
+/** The shape whose text best matches what the AI quoted (words in common). */
+function bestMatch(shapes: readonly ShapeView[], quote: string): ShapeView | undefined {
+  const words = (t: string): Set<string> => new Set(t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2));
+  const q = words(quote);
+  if (q.size === 0) return undefined;
+  let best: ShapeView | undefined;
+  let score = 0;
+  for (const s of shapes) {
+    const w = words(s.label ?? "");
+    let common = 0;
+    for (const x of q) if (w.has(x)) common += 1;
+    const sc = common / Math.max(1, Math.min(q.size, w.size));
+    if (sc > score) {
+      score = sc;
+      best = s;
+    }
+  }
+  return score >= 0.34 ? best : undefined;
 }

@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { REACTIONS } from "../canvas/controller";
 import type { Editor } from "../canvas/editor";
 import { TEMPLATES } from "../canvas/templates";
+import { tidy } from "../canvas/features";
+import { branchBoard } from "../canvas/branch";
 import { navigate } from "../router";
 import { useUiStore, type Tool } from "../state/ui-store";
 import { Icon, Kbd, MOD, spring, type IconName } from "./kit";
@@ -58,6 +60,17 @@ function commands(editor: Editor, close: () => void): Command[] {
     tool("text", "Text", "text", "T"),
     tool("frame", "Frame", "frame", "F"),
     tool("comment", "Comment", "comment", "C"),
+    { id: "voice-command", label: "Voice: say a command", group: "AI", icon: "sparkle" as const, edits: true, run: () => useUiStore.getState().setVoice({ mode: "command", heard: "" }) },
+    { id: "voice-meeting", label: "Voice: take meeting notes", group: "AI", icon: "sparkle" as const, edits: true, run: () => useUiStore.getState().setVoice({ mode: "meeting", heard: "" }) },
+    { id: "ai-review", label: "AI teammate: review the board", group: "AI", icon: "sparkle" as const, edits: true, run: () => void editor.ai.suggest() },
+    { id: "tidy", label: "Tidy up (auto-layout)", group: "Arrange", icon: "fit" as const, edits: true, run: () => useUiStore.getState().setNotice(`Tidied ${tidy(editor)} shapes`) },
+    { id: "install", label: "Install Tandem as an app", group: "View", icon: "download" as const, edits: false, run: () => void import("../pwa").then(async (m) => (await m.installApp()) || useUiStore.getState().setNotice(m.isInstalled() ? "Tandem is already installed" : "Use your browser menu → Install app")) },
+    { id: "comments", label: "Comments: all threads", group: "Together", icon: "comment" as const, edits: false, run: () => useUiStore.getState().setCommentsOpen(true) },
+    { id: "call", label: "Video call on this board", group: "Together", icon: "chat" as const, edits: false, run: () => void import("../canvas/call").then(({ callFor }) => (callFor(editor).joined ? callFor(editor).leave() : void callFor(editor).join())) },
+    { id: "presenter", label: "Presenter view (notes, timer, next slide)", group: "View", icon: "eye" as const, edits: false, run: () => { useUiStore.getState().setPresenterOpen(true); editor.startPresenting(); } },
+    { id: "pptx", label: "Export slides as PowerPoint", group: "Export", icon: "download" as const, edits: false, run: () => void import("../canvas/deck-export").then((m) => m.exportPptx(editor)) },
+    { id: "video", label: "Export slides as a video", group: "Export", icon: "download" as const, edits: false, run: () => void import("../canvas/deck-export").then((m) => m.exportVideo(editor)) },
+    { id: "branch", label: "Branch this board (try an idea safely)", group: "Board", icon: "copy" as const, edits: false, run: () => void branchBoard(editor) },
     { id: "tpl-gallery", label: `Browse all ${TEMPLATES.length} templates…`, group: "Templates", icon: "plus" as const, edits: true, run: () => useUiStore.getState().setGalleryOpen(true) },
     ...TEMPLATES.map((t) => ({ id: `tpl-${t.id}`, label: `Insert template: ${t.name}`, group: "Templates", icon: "plus" as const, edits: true, run: () => editor.insertTemplate(t.id) })),
     { id: "ai", label: "Ask the AI…", group: "AI", icon: "sparkle", edits: true, run: () => ui.setAiOpen(true) },

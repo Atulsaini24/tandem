@@ -8,6 +8,12 @@
       "port": 5173
     },
     {
+      "name": "web-prod",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@canvas/web", "exec", "vite", "preview", "--port", "4173", "--strictPort"],
+      "port": 4173
+    },
+    {
       "name": "sync",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@canvas/server", "dev"],

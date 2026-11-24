@@ -180,3 +180,39 @@ describe("multiple server instances", () => {
     await until(() => !seenByBob.has("alice") && !seenByCarol.has("alice"), "leave crosses instances");
   });
 });
+
+describe("signals (call setup)", () => {
+  it("reach exactly one client, on this instance or another, stamped with the sender's id", async () => {
+    const { servers } = await cluster(2, 5);
+    const inbox: Record<string, Array<{ from: string; text: string }>> = { a: [], b: [], c: [] };
+    const client = (server: SyncServer, id: string): SyncClient => {
+      const c = new SyncClient({
+        url: `ws://127.0.0.1:${server.port}`,
+        docId: "doc",
+        clientId: id,
+        onDelta: () => undefined,
+        onSignal: (from, payload) => inbox[id]?.push({ from, text: new TextDecoder().decode(payload) }),
+        minBackoffMs: 10,
+        maxBackoffMs: 40,
+      });
+      cleanup.push(() => c.stop());
+      c.start();
+      return c;
+    };
+    const [s0, s1] = servers as [SyncServer, SyncServer];
+    const a = client(s0, "a");
+    const b = client(s0, "b"); // same instance as a
+    const c = client(s1, "c"); // another instance
+    await until(() => [a, b, c].every((x) => x.status === "online"), "all online");
+    expect(a.signal("b", new TextEncoder().encode("offer-b"))).toBe(true);
+    expect(a.signal("c", new TextEncoder().encode("offer-c"))).toBe(true);
+    await until(() => inbox.b?.length === 1 && inbox.c?.length === 1, "signals delivered");
+    expect(inbox.b).toEqual([{ from: "a", text: "offer-b" }]);
+    expect(inbox.c).toEqual([{ from: "a", text: "offer-c" }]);
+    // Nobody else hears it, and a signal to nobody goes nowhere.
+    c.signal("ghost", new TextEncoder().encode("hello?"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(inbox.a).toEqual([]);
+    expect(inbox.b).toHaveLength(1);
+  });
+});

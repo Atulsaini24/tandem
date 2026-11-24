@@ -24,6 +24,9 @@ const KIND_ICON: Record<ShapeView["kind"], IconName> = {
   chart: "chart",
   scene3d: "cube",
   slide: "slides",
+  art: "sparkle",
+  embed: "link",
+  poll: "star",
 };
 
 const describe = (s: ShapeView): string => {

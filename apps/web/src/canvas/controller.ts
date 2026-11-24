@@ -18,6 +18,8 @@ import {
   type Rect,
 } from "./geometry";
 import type { Guide } from "./renderer";
+import { embedLink, importTable, looksLikeTable, offerPhoto } from "./features";
+import { imageFrom } from "./image";
 import type { Point } from "./viewport";
 
 type Mode =
@@ -121,7 +123,16 @@ export class Controller {
     this.#onWindow("paste", (e) => {
       if (isTyping(e.target)) return;
       e.preventDefault();
-      this.#editor.paste(e.clipboardData?.getData("text/plain") ?? undefined);
+      // A photo → Photo to board; spreadsheet rows → a chart; a link → a live embed.
+      const image = imageFrom(e.clipboardData?.items);
+      if (image) {
+        void offerPhoto(image);
+        return;
+      }
+      const text = e.clipboardData?.getData("text/plain") ?? undefined;
+      if (text && looksLikeTable(text) && importTable(this.#editor, text)) return;
+      if (text && embedLink(this.#editor, text)) return;
+      this.#editor.paste(text);
     });
     this.#onWindow("copy", (e) => {
       if (isTyping(e.target) || useUiStore.getState().selection.size === 0) return;

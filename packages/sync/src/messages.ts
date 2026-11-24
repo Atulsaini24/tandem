@@ -10,21 +10,27 @@ import { DecodeError, Reader, Writer } from "./codec.js";
  *                     PUSH      clientSeq, delta
  *                     PRESENCE  payload                 (ephemeral, latest wins)
  *                     HISTORY?  requestId, at           ("what did the doc look like at seq N?")
+ *                     SIGNAL    to, payload             (point-to-point, e.g. WebRTC offers)
  *   server → client   DELTA     serverSeq, delta        (backlog after HELLO, then live)
  *                     WELCOME   head, readOnly          (backlog done, you're live)
  *                     ACK       clientSeq, serverSeq    (your push is durable)
  *                     PRESENCE  clientId, payload       (someone's cursor/selection)
  *                     LEAVE     clientId                (their connection closed)
  *                     HISTORY   requestId, at, head, state (encoded DocDelta at seq `at`)
+ *                     SIGNAL    from, payload           (a peer's point-to-point message)
  *                     ERROR     fatal, message
  */
-/** v2: HELLO carries an access token. v3: WELCOME says whether this client may edit. */
-export const PROTOCOL_VERSION = 3;
+/**
+ * v2: HELLO carries an access token. v3: WELCOME says whether this client may edit.
+ * v4: SIGNAL relays opaque bytes to one other client in the room (call setup).
+ */
+export const PROTOCOL_VERSION = 4;
 
 const HELLO = 1;
 const PUSH = 2;
 const CLIENT_PRESENCE = 3;
 const HISTORY_REQUEST = 4;
+const CLIENT_SIGNAL = 5;
 const WELCOME = 16;
 const DELTA = 17;
 const ACK = 18;
@@ -32,6 +38,7 @@ const ERROR = 19;
 const SERVER_PRESENCE = 20;
 const LEAVE = 21;
 const HISTORY = 22;
+const SERVER_SIGNAL = 23;
 
 export type ClientMessage =
   | {
@@ -44,7 +51,8 @@ export type ClientMessage =
     }
   | { readonly type: "push"; readonly clientSeq: number; readonly delta: Uint8Array }
   | { readonly type: "presence"; readonly payload: Uint8Array }
-  | { readonly type: "history"; readonly requestId: number; readonly at: number };
+  | { readonly type: "history"; readonly requestId: number; readonly at: number }
+  | { readonly type: "signal"; readonly to: string; readonly payload: Uint8Array };
 
 export type ServerMessage =
   | { readonly type: "welcome"; readonly head: number; readonly readOnly: boolean }
@@ -59,6 +67,7 @@ export type ServerMessage =
       readonly head: number;
       readonly state: Uint8Array;
     }
+  | { readonly type: "signal"; readonly from: string; readonly payload: Uint8Array }
   | { readonly type: "error"; readonly fatal: boolean; readonly message: string };
 
 export function encodeClientMessage(message: ClientMessage): Uint8Array {
@@ -86,6 +95,11 @@ export function encodeClientMessage(message: ClientMessage): Uint8Array {
       w.uint(message.requestId);
       w.uint(message.at);
       break;
+    case "signal":
+      w.byte(CLIENT_SIGNAL);
+      w.str(message.to);
+      w.bytes(message.payload);
+      break;
   }
   return w.finish();
 }
@@ -112,6 +126,7 @@ export function decodeClientMessage(bytes: Uint8Array): ClientMessage {
     r.end();
     return message;
   }
+  if (type === CLIENT_SIGNAL) return { type: "signal", to: r.str(), payload: r.rest() };
   throw new DecodeError(`unknown client message type ${type}`);
 }
 
@@ -149,6 +164,11 @@ export function encodeServerMessage(message: ServerMessage): Uint8Array {
       w.uint(message.head);
       w.bytes(message.state);
       break;
+    case "signal":
+      w.byte(SERVER_SIGNAL);
+      w.str(message.from);
+      w.bytes(message.payload);
+      break;
     case "error":
       w.byte(ERROR);
       w.byte(message.fatal ? 1 : 0);
@@ -178,6 +198,8 @@ export function decodeServerMessage(bytes: Uint8Array): ServerMessage {
       break;
     case HISTORY:
       return { type: "history", requestId: r.uint(), at: r.uint(), head: r.uint(), state: r.rest() };
+    case SERVER_SIGNAL:
+      return { type: "signal", from: r.str(), payload: r.rest() };
     case ERROR:
       message = { type: "error", fatal: r.byte() === 1, message: r.str() };
       break;

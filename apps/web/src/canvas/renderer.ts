@@ -638,6 +638,9 @@ export class Renderer {
         return "none";
       case "chart":
       case "slide":
+      case "art":
+      case "embed":
+      case "poll":
       case "scene3d":
         return "svg";
       default:
@@ -685,7 +688,8 @@ export class Renderer {
 
   /** A round badge with the vote count; ringed when one of the votes is yours. */
   #syncBadge(node: ShapeNode): void {
-    const voters = node.view.voters ?? [];
+    // A poll's votes are drawn as its bars, not as a dot-vote badge.
+    const voters = node.view.kind === "poll" ? [] : (node.view.voters ?? []);
     const mine = voters.includes(this.voter);
     const key = voters.length > 0 ? `${voters.length}|${mine}|${this.#theme.name}` : "";
     if (key === node.badgeKey) return;
@@ -766,7 +770,7 @@ export class Renderer {
 
   #syncLabel(node: ShapeNode): void {
     const view = node.view;
-    const text = view.kind === "arrow" || view.kind === "frame" || view.kind === "path" || view.kind === "chart" || view.kind === "scene3d" || view.kind === "slide" ? undefined : view.label;
+    const text = view.kind === "arrow" || view.kind === "frame" || view.kind === "path" || view.kind === "chart" || view.kind === "scene3d" || view.kind === "slide" || view.kind === "art" || view.kind === "embed" || view.kind === "poll" ? undefined : view.label;
     if (!text) {
       node.label?.destroy();
       node.label = undefined;
@@ -802,7 +806,9 @@ export class Renderer {
   /** Frame titles and comment authors. */
   #syncCaption(node: ShapeNode): void {
     const view = node.view;
-    const text = view.kind === "frame" ? (view.label ?? "Frame") : view.kind === "comment" ? (view.author ?? "") : "";
+    const replies = view.kind === "comment" ? (view.replies?.length ?? 0) : 0;
+    const resolved = view.kind === "comment" && (view.data ?? "").includes('"resolved":true');
+    const text = view.kind === "frame" ? (view.label ?? "Frame") : view.kind === "comment" ? `${view.author ?? ""}${replies > 0 ? `  ·  ${replies} repl${replies === 1 ? "y" : "ies"}` : ""}${resolved ? "  ·  ✓ resolved" : ""}` : "";
     if (!text) {
       node.caption?.destroy();
       node.caption = undefined;
@@ -826,7 +832,7 @@ export class Renderer {
     const { x, y, w, h, rotation, alpha } = node.pose;
     const view = node.view;
     const holder = node.holder;
-    holder.alpha = alpha;
+    holder.alpha = node.view.kind === "comment" && (node.view.data ?? "").includes('"resolved":true') ? alpha * 0.45 : alpha;
     if (view.kind === "arrow") {
       holder.position.set(0, 0);
       holder.rotation = 0;
@@ -900,7 +906,8 @@ export class Renderer {
         return;
       }
       case "comment": {
-        // A pin (initial inside) and, when there's text, a card beside it.
+        // A pin (initial inside) and, when there's text, a card beside it. Resolved
+        // threads fade back so open ones stand out.
         g.circle(left + 16, top + 16, 15).fill(fill).stroke({ width: 2.5, color: 0xffffff });
         g.moveTo(left + 5, top + 26).lineTo(left + 1, top + 33).lineTo(left + 12, top + 30).fill(fill);
         if (view.label) {
@@ -927,10 +934,10 @@ export class Renderer {
     const view = node.view;
     const width = Math.max(40, Math.round(w));
     const height = Math.max(30, Math.round(h));
-    const key = `${view.kind}|${view.data ?? ""}|${view.label ?? ""}|${width}|${height}|${this.#theme.name}`;
+    const key = `${view.kind}|${view.data ?? ""}|${view.label ?? ""}|${width}|${height}|${this.#theme.name}|${view.kind === "poll" ? (view.voters ?? []).join(",") : ""}`;
     if (key === node.svgKey) return;
     node.svgKey = key;
-    const svg = designSvg(view.kind, view.data, view.label, width, height, CHART_THEMES[this.#theme.name]);
+    const svg = designSvg(view.kind, view.data, view.label, width, height, CHART_THEMES[this.#theme.name], view.voters);
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
     const image = new Image();
     image.onload = () => {

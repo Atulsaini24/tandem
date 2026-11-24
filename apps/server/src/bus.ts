@@ -13,6 +13,8 @@ export type BusMessage =
   | { readonly kind: "delta"; readonly seq: number; readonly delta: Uint8Array }
   | { readonly kind: "presence"; readonly clientId: string; readonly payload: Uint8Array }
   | { readonly kind: "leave"; readonly clientId: string }
+  /** A point-to-point message for a client that may be on another instance. */
+  | { readonly kind: "signal"; readonly from: string; readonly to: string; readonly payload: Uint8Array }
   /** "Re-announce your local presences on this document" (a new instance joined it). */
   | { readonly kind: "who" };
 
@@ -31,6 +33,7 @@ const DELTA = 1;
 const PRESENCE = 2;
 const LEAVE = 3;
 const WHO = 4;
+const SIGNAL = 5;
 
 export function encodeBusMessage(from: string, message: BusMessage): Uint8Array {
   const w = new Writer();
@@ -53,6 +56,12 @@ export function encodeBusMessage(from: string, message: BusMessage): Uint8Array 
     case "who":
       w.byte(WHO);
       break;
+    case "signal":
+      w.byte(SIGNAL);
+      w.str(message.from);
+      w.str(message.to);
+      w.bytes(message.payload);
+      break;
   }
   return w.finish();
 }
@@ -68,6 +77,7 @@ export function decodeBusMessage(bytes: Uint8Array): { from: string; message: Bu
     r.end();
     return { from, message };
   }
+  if (kind === SIGNAL) return { from, message: { kind: "signal", from: r.str(), to: r.str(), payload: r.rest() } };
   if (kind === WHO) {
     r.end();
     return { from, message: { kind: "who" } };

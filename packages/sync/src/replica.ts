@@ -28,6 +28,8 @@ export interface OfflineReplicaOptions {
   readonly onRemote?: (delta: DocDelta) => void;
   readonly onState?: (state: SyncState) => void;
   readonly onPresence?: (clientId: string, presence: Presence | null) => void;
+  /** A point-to-point message (text) from another client: WebRTC call setup. */
+  readonly onSignal?: (from: string, data: string) => void;
   readonly createSocket?: (url: string) => SocketLike;
   readonly token?: string;
   readonly minBackoffMs?: number;
@@ -108,6 +110,17 @@ export class OfflineReplica {
           // Malformed presence from another client: ignore it, never crash on it.
         }
       },
+      ...(options.onSignal
+        ? {
+            onSignal: (from: string, payload: Uint8Array) => {
+              try {
+                options.onSignal?.(from, new TextDecoder("utf-8", { fatal: true }).decode(payload));
+              } catch {
+                // Not text: not ours.
+              }
+            },
+          }
+        : {}),
       ...(options.onState ? { onState: options.onState } : {}),
       ...(options.createSocket ? { createSocket: options.createSocket } : {}),
       ...(options.token ? { token: options.token } : {}),
@@ -186,6 +199,11 @@ export class OfflineReplica {
   /** The document as it was at server seq `at` (needs a connection). */
   history(at: number): Promise<HistoryVersion> {
     return this.sync.requestHistory(at);
+  }
+
+  /** Send text to one other client in this document. False while offline. */
+  signal(to: string, data: string): boolean {
+    return this.sync.signal(to, new TextEncoder().encode(data));
   }
 
   setPresence(presence: Presence): void {

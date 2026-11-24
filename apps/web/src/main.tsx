@@ -2,6 +2,7 @@ import { StrictMode, Suspense, lazy, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { watchSystemTheme } from "./canvas/theme";
 import { useRoute } from "./router";
+import { registerPwa } from "./pwa";
 import { useUiStore } from "./state/ui-store";
 import "./styles.css";
 
@@ -31,6 +32,8 @@ function Root() {
     </Suspense>
   );
 }
+
+registerPwa();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root element missing");

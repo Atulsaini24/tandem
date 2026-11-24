@@ -281,6 +281,7 @@ function SlideForm({ editor, id, draft, update }: { editor: Editor; id: string; 
           <Field label={layout === "statement" ? "Statement — wrap key words in *asterisks*" : "Title"} value={str(draft.title)} onChange={(v) => update({ title: v })} multiline rows={2} />
           <Field label="Subtitle" value={str(draft.subtitle)} onChange={(v) => update({ subtitle: v })} multiline rows={2} />
           <Field label="Deck name (footer)" value={str(draft.deck)} onChange={(v) => update({ deck: v })} />
+          <Field label="Speaker notes (presenter view & PowerPoint)" value={str(draft.notes)} onChange={(v) => update({ notes: v.slice(0, 1200) })} multiline rows={3} placeholder="What to say on this slide" />
         </div>
       </Group>
       {usesItems && (

@@ -180,6 +180,8 @@ function ExportMenu({ editor }: { editor: Editor | null }) {
               { label: "PNG image", hint: "2× resolution", fn: () => editor.exportPng() },
               { label: "SVG vector", hint: "Scales forever", fn: () => editor.exportSvg() },
               { label: "PDF", hint: "Print dialog", fn: () => editor.exportPdf() },
+              { label: "PowerPoint", hint: "Slides + notes", fn: () => import("../canvas/deck-export").then((m) => m.exportPptx(editor)).then(() => undefined) },
+              { label: "Video", hint: "Slides as .webm", fn: () => import("../canvas/deck-export").then((m) => m.exportVideo(editor)).then(() => undefined) },
             ].map((item) => (
               <button
                 key={item.label}
@@ -204,6 +206,7 @@ export function TopBar({ editor, onShare }: { editor: Editor | null; onShare: ()
   const peers = useUiStore((s) => s.peers);
   const followed = peers.find((p) => p.clientId === following);
   const presentable = editor !== null;
+  const inCall = useUiStore((s) => s.call);
   return (
     <>
       <motion.header
@@ -225,6 +228,33 @@ export function TopBar({ editor, onShare }: { editor: Editor | null; onShare: ()
           <div className="hidden sm:block">
             <Avatars editor={editor} />
           </div>
+          <motion.button
+            type="button"
+            onClick={() => useUiStore.getState().setCommentsOpen(!useUiStore.getState().commentsOpen)}
+            disabled={!editor}
+            whileTap={{ scale: 0.96 }}
+            title="Comments: every thread on this board"
+            className="hidden h-9 w-9 place-items-center rounded-xl border border-line text-[15px] hover:bg-hover disabled:opacity-40 sm:grid"
+          >
+            💬
+          </motion.button>
+          <motion.button
+            type="button"
+            onClick={() => {
+              if (!editor) return;
+              void import("../canvas/call").then(({ callFor }) => {
+                const call = callFor(editor);
+                if (call.joined) call.leave();
+                else void call.join();
+              });
+            }}
+            disabled={!editor}
+            whileTap={{ scale: 0.96 }}
+            title={inCall ? "Leave the video call" : "Start or join a video call on this board"}
+            className={`grid h-9 w-9 place-items-center rounded-xl border text-[15px] disabled:opacity-40 ${inCall ? "border-[#22c3a6] bg-[#22c3a6]/15" : "border-line hover:bg-hover"}`}
+          >
+            📹
+          </motion.button>
           <span className="mx-1 hidden h-5 w-px bg-line sm:block" />
           <motion.button
             type="button"
@@ -239,6 +269,19 @@ export function TopBar({ editor, onShare }: { editor: Editor | null; onShare: ()
           </motion.button>
           <motion.button
             type="button"
+            onClick={() => {
+              useUiStore.getState().setPresenterOpen(true);
+              editor?.startPresenting();
+            }}
+            disabled={!presentable}
+            whileTap={{ scale: 0.96 }}
+            title="Presenter view: notes, timer and next slide in a second window"
+            className="hidden h-9 items-center rounded-xl border border-line px-2.5 text-[13px] font-semibold text-ink hover:bg-hover disabled:opacity-40 lg:flex"
+          >
+            🎤
+          </motion.button>
+          <motion.button
+            type="button"
             data-tour="share"
             onClick={onShare}
             disabled={!editor}
@@ -247,6 +290,16 @@ export function TopBar({ editor, onShare }: { editor: Editor | null; onShare: ()
           >
             <Icon name="share" className="h-4 w-4" />
             <span className="hidden sm:inline">Share</span>
+          </motion.button>
+          <motion.button
+            type="button"
+            onClick={() => editor && void import("../canvas/branch").then((m) => m.branchBoard(editor))}
+            disabled={!editor}
+            whileTap={{ scale: 0.96 }}
+            title="Branch: a safe copy to try an idea, then merge it back"
+            className="hidden h-9 items-center gap-1.5 rounded-xl border border-line px-2.5 text-[13px] font-semibold text-ink hover:bg-hover disabled:opacity-40 md:flex"
+          >
+            🌿 <span className="hidden xl:inline">Branch</span>
           </motion.button>
           <ExportMenu editor={editor} />
           <div className="hidden sm:block">

@@ -1,8 +1,9 @@
 import type { ShapeView } from "@canvas/doc";
-import { ContactShadows, Environment, Html, Lightformer, OrbitControls, Sky, Sparkles, Stars } from "@react-three/drei";
+import { ContactShadows, Environment, Html, Lightformer, OrbitControls, Sky, Sparkles, Stars, useGLTF } from "@react-three/drei";
+import { createXRStore, XR, type XRStore } from "@react-three/xr";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, Suspense, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import type { Editor } from "../canvas/editor";
 import { parseScene, sceneRadius, type Backdrop, type Material, type Motion, type SceneObject, type SceneSpec } from "../canvas/scenes";
@@ -342,8 +343,73 @@ function Model({ o, index, night }: { o: SceneObject; index: number; night: bool
           </mesh>
         </group>
       );
+    case "model":
+      return (
+        <ModelBoundary size={o.size}>
+          <Suspense fallback={<LoadingBox size={o.size} />}>
+            <Gltf url={o.url} size={o.size} />
+          </Suspense>
+        </ModelBoundary>
+      );
     default:
       return null;
+  }
+}
+
+/** A real 3D model from a .glb/.gltf link, scaled into the object's box and stood on its base. */
+function Gltf({ url, size }: { url: string; size: readonly [number, number, number] }) {
+  const gltf = useGLTF(url);
+  const fitted = useMemo(() => {
+    const copy = gltf.scene.clone(true);
+    copy.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      }
+    });
+    const box = new THREE.Box3().setFromObject(copy);
+    const dims = box.getSize(new THREE.Vector3());
+    const k = Math.min(size[0] / Math.max(dims.x, 1e-3), size[1] / Math.max(dims.y, 1e-3), size[2] / Math.max(dims.z, 1e-3));
+    const center = box.getCenter(new THREE.Vector3());
+    // Centred sideways, standing on the bottom of its box.
+    copy.position.set(-center.x * k, -box.min.y * k - size[1] / 2, -center.z * k);
+    copy.scale.setScalar(k);
+    const holder = new THREE.Group();
+    holder.add(copy);
+    return holder;
+  }, [gltf, size[0], size[1], size[2]]);
+  return <primitive object={fitted} />;
+}
+
+function LoadingBox({ size }: { size: readonly [number, number, number] }) {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    if (ref.current) ref.current.rotation.y = clock.elapsedTime * 1.5;
+  });
+  return (
+    <mesh ref={ref}>
+      <boxGeometry args={[size[0] * 0.6, size[1] * 0.6, size[2] * 0.6]} />
+      <meshStandardMaterial color="#5b8cff" wireframe />
+    </mesh>
+  );
+}
+
+/** A model that fails to load (bad link, no CORS) shows a red box instead of breaking the scene. */
+class ModelBoundary extends Component<{ size: readonly [number, number, number]; children: ReactNode }, { failed: boolean }> {
+  override state = { failed: false };
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+  override render(): ReactNode {
+    if (!this.state.failed) return this.props.children;
+    const [w, h, d] = this.props.size;
+    return (
+      <mesh>
+        <boxGeometry args={[w * 0.6, h * 0.6, d * 0.6]} />
+        <meshStandardMaterial color="#ff5c5c" wireframe />
+      </mesh>
+    );
   }
 }
 
@@ -747,9 +813,11 @@ export interface SceneViewProps {
   readonly autoRotate?: boolean;
   /** Bump to fly the camera back home. */
   readonly reset?: number;
+  /** VR/AR: the session store (only while exploring). */
+  readonly xr?: XRStore;
 }
 
-export function SceneView({ spec, orbiting, explore = NO_EXPLORE, paused = false, autoRotate, reset = 0 }: SceneViewProps) {
+export function SceneView({ spec, orbiting, explore = NO_EXPLORE, paused = false, autoRotate, reset = 0, xr }: SceneViewProps) {
   const r = sceneRadius(spec);
   const night = spec.backdrop === "night" || spec.backdrop === "space";
   const hasGround = spec.objects.some((o) => o.shape === "plane");
@@ -773,6 +841,7 @@ export function SceneView({ spec, orbiting, explore = NO_EXPLORE, paused = false
       camera={{ position: [r * 0.78, r * 0.52, r * 0.95], fov: 42, near: 0.05, far: 800 }}
       onPointerMissed={() => explore.select(undefined)}
     >
+      <XrMaybe store={xr}>
       <ExploreCtx.Provider value={explore}>
         <ClockCtx.Provider value={{ current: clock, paused }}>
           <LiveCtx.Provider value={live}>
@@ -797,8 +866,24 @@ export function SceneView({ spec, orbiting, explore = NO_EXPLORE, paused = false
           </LiveCtx.Provider>
         </ClockCtx.Provider>
       </ExploreCtx.Provider>
+      </XrMaybe>
     </Canvas>
   );
+}
+
+function XrMaybe({ store, children }: { store: XRStore | undefined; children: ReactNode }): ReactNode {
+  return store ? <XR store={store}>{children}</XR> : children;
+}
+
+/** Whether this browser/device can open an immersive session ("immersive-vr" or "immersive-ar"). */
+function useXrSupport(): { vr: boolean; ar: boolean } {
+  const [support, setSupport] = useState({ vr: false, ar: false });
+  useEffect(() => {
+    const xr = (navigator as Navigator & { xr?: { isSessionSupported(mode: string): Promise<boolean> } }).xr;
+    if (!xr) return;
+    void Promise.all([xr.isSessionSupported("immersive-vr").catch(() => false), xr.isSessionSupported("immersive-ar").catch(() => false)]).then(([vr, ar]) => setSupport({ vr, ar }));
+  }, []);
+  return support;
 }
 
 function Effects({ glow }: { glow: boolean }): ReactNode {
@@ -889,6 +974,9 @@ function LiveScene({ editor, shape, orbiting }: { editor: Editor; shape: ShapeVi
   const [reset, setReset] = useState(0);
   const [full, setFull] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [modelUrl, setModelUrl] = useState("");
+  const xrSupport = useXrSupport();
+  const xrStore = useMemo(() => (xrSupport.vr || xrSupport.ar ? createXRStore({ emulate: false }) : undefined), [xrSupport.vr, xrSupport.ar]);
   const exit = (): void => {
     useUiStore.getState().setOrbiting(undefined);
     setSelected(undefined);
@@ -963,7 +1051,7 @@ function LiveScene({ editor, shape, orbiting }: { editor: Editor; shape: ShapeVi
 
   const ui = (
     <>
-      <SceneView spec={spec} orbiting={orbiting} explore={explore} paused={paused} autoRotate={orbiting ? spin : true} reset={reset} />
+      <SceneView spec={spec} orbiting={orbiting} explore={explore} paused={paused} autoRotate={orbiting ? spin : true} reset={reset} {...(orbiting && xrStore ? { xr: xrStore } : {})} />
       {/* Title bar over the scene. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 bg-gradient-to-b from-black/60 to-transparent px-3 pb-8 pt-3">
         <span className="truncate pt-1.5 text-[13px] font-bold text-white drop-shadow">{spec.title || shape.label || "3D scene"}</span>
@@ -981,6 +1069,16 @@ function LiveScene({ editor, shape, orbiting }: { editor: Editor; shape: ShapeVi
             <ToolButton title="Add an object" active={adding} onClick={() => setAdding(!adding)}>
               ＋ Add
             </ToolButton>
+            {xrStore && xrSupport.vr && (
+              <ToolButton title="View in VR (headset)" onClick={() => void xrStore.enterVR()}>
+                🥽 VR
+              </ToolButton>
+            )}
+            {xrStore && xrSupport.ar && (
+              <ToolButton title="Place it in your room (AR)" onClick={() => void xrStore.enterAR()}>
+                📱 AR
+              </ToolButton>
+            )}
             <ToolButton title={full ? "Exit fullscreen" : "Fullscreen"} onClick={() => setFull(!full)}>
               {full ? "⤡" : "⤢"}
             </ToolButton>
@@ -1022,6 +1120,38 @@ function LiveScene({ editor, shape, orbiting }: { editor: Editor; shape: ShapeVi
               <span className="text-[10px] font-semibold">{a.label}</span>
             </button>
           ))}
+          <div className="col-span-3 mt-1 border-t border-white/10 pt-2">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-white/60">Import a 3D model (.glb link)</p>
+            <div className="flex gap-1">
+              <input
+                value={modelUrl}
+                onChange={(e) => setModelUrl(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+                placeholder="https://…/model.glb"
+                className="min-w-0 flex-1 rounded-lg bg-white/10 px-2 py-1 text-[11px] text-white outline-none placeholder:text-white/40"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const url = modelUrl.trim();
+                  const next = parseScene(serialize(spec, [...spec.objects, { shape: "model", label: url.split("/").pop()?.replace(/\.(glb|gltf).*$/i, "") ?? "Model", color: "#ffffff", position: [0, 1, 0], size: [2.5, 2.5, 2.5], motion: "none", url } as unknown as SceneObject]));
+                  const added = next && next.objects.length > spec.objects.length;
+                  if (next && added) {
+                    save(next.objects);
+                    setSelected(next.objects.length - 1);
+                    setModelUrl("");
+                    setAdding(false);
+                  } else useUiStore.getState().setNotice("Use an https link ending in .glb or .gltf");
+                }}
+                className="shrink-0 rounded-lg bg-[#5b8cff] px-2 text-[11px] font-bold text-white"
+              >
+                Add
+              </button>
+            </div>
+            <button type="button" onClick={() => setModelUrl("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Duck/glTF-Binary/Duck.glb")} className="mt-1 text-[10px] font-semibold text-[#9fc2ff] hover:underline">
+              Try a sample (Khronos duck)
+            </button>
+          </div>
         </div>
       )}
 
@@ -1069,6 +1199,24 @@ function LiveScene({ editor, shape, orbiting }: { editor: Editor; shape: ShapeVi
                 <button type="button" onClick={() => patchSelected({ glow: !sel.glow })} className={`rounded-lg px-2 py-1 text-[11px] font-bold ${sel.glow ? "bg-[#ffb547] text-black" : "bg-white/10 hover:bg-white/20"}`}>
                   {sel.glow ? "On" : "Off"}
                 </button>
+              </div>
+              <div className="mt-2.5 grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-white/50">
+                  Height
+                  <input type="range" min={0} max={8} step={0.25} value={sel.lift} onChange={(e) => patchSelected({ lift: Number(e.target.value) })} className="min-w-0 flex-1 accent-[#5b8cff]" />
+                </label>
+                <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-white/50">
+                  Turn
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    step={5}
+                    value={Math.round((sel.rotation[1] * 180) / Math.PI)}
+                    onChange={(e) => patchSelected({ rotation: [sel.rotation[0], (Number(e.target.value) * Math.PI) / 180, sel.rotation[2]] })}
+                    className="min-w-0 flex-1 accent-[#5b8cff]"
+                  />
+                </label>
               </div>
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                 <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-white/50">Motion</span>

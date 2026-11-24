@@ -33,6 +33,8 @@ export type EditCommand =
   | { readonly type: "meta"; readonly seq: number; readonly meta: Omit<BoardMeta, "title"> }
   /** Toggle this person's dot vote on a shape (not an undo step). */
   | { readonly type: "vote"; readonly seq: number; readonly id: NodeId; readonly voter: string; readonly on: boolean }
+  /** Add/edit/remove ("") one reply in a comment thread. */
+  | { readonly type: "reply"; readonly seq: number; readonly id: NodeId; readonly key: string; readonly value: string }
   | { readonly type: "undo"; readonly seq: number }
   | { readonly type: "redo"; readonly seq: number }
   /** Make the live document match the version at server seq `at`. */
@@ -44,6 +46,8 @@ export type ControlCommand =
   /** Go offline / back online (the demo toggle). */
   | { readonly type: "network"; readonly online: boolean }
   | { readonly type: "presence"; readonly presence: Presence }
+  /** A point-to-point message to another client (call setup). */
+  | { readonly type: "signal"; readonly to: string; readonly data: string }
   /** Fetch the document as it was at server seq `at` (Infinity-ish = the head). */
   | { readonly type: "history"; readonly requestId: number; readonly at: number };
 
@@ -83,6 +87,14 @@ export interface RestoredEvent {
   readonly shapes: number;
   readonly pending: number;
   readonly persistent: boolean;
+  /** This tab's client id on the server (peers see it as their clientId). */
+  readonly clientId: string;
+}
+
+export interface SignalEvent {
+  readonly type: "signal";
+  readonly from: string;
+  readonly data: string;
 }
 
 export interface PresenceEvent {
@@ -112,4 +124,4 @@ export interface TitleEvent {
   readonly meta: BoardMeta;
 }
 
-export type EngineEvent = TitleEvent | PatchEvent | ErrorEvent | SyncEvent | RestoredEvent | PresenceEvent | UndoStateEvent | HistoryEvent;
+export type EngineEvent = TitleEvent | PatchEvent | ErrorEvent | SyncEvent | RestoredEvent | PresenceEvent | UndoStateEvent | HistoryEvent | SignalEvent;

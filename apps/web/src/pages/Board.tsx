@@ -19,6 +19,15 @@ import { SlideTextEdit } from "../ui/SlideTextEdit";
 import { Scenes3D } from "../ui/Scenes3D";
 import { ShareDialog } from "../ui/ShareDialog";
 import { Studio } from "../ui/Studio";
+import { Overlays } from "../ui/Overlays";
+import { BranchBar } from "../ui/BranchBar";
+import { PhotoImport } from "../ui/PhotoImport";
+import { PresenterView } from "../ui/PresenterView";
+import { CallDock } from "../ui/CallDock";
+import { CommentThread, CommentsInbox } from "../ui/CommentThread";
+import { Voice } from "../ui/Voice";
+import { importTable, offerPhoto } from "../canvas/features";
+import { imageFrom, tableFrom } from "../canvas/image";
 import { TemplateGallery } from "../ui/TemplateGallery";
 import { TeamBar } from "../ui/TeamBar";
 import { Toolbar } from "../ui/Toolbar";
@@ -126,11 +135,27 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
   return (
     <div className="relative h-full w-full select-none overflow-hidden bg-canvas">
       {/* The canvas area, and everything that lives on top of the canvas itself. */}
-      <div className="absolute transition-[left,right,top] duration-300 ease-out" style={inset}>
+      <div
+        className="absolute transition-[left,right,top] duration-300 ease-out"
+        style={inset}
+        onDragOver={(e) => {
+          if ([...e.dataTransfer.types].includes("Files")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          // A photo → Photo to board; a CSV/TSV → a chart.
+          const image = imageFrom(e.dataTransfer.files);
+          const table = tableFrom(e.dataTransfer.files);
+          if (!image && !table) return;
+          e.preventDefault();
+          if (image) void offerPhoto(image);
+          else if (table && editor) void table.text().then((text) => importTable(editor, text, table.name) || useUiStore.getState().setNotice(`${table.name} doesn't look like a table.`));
+        }}
+      >
         <div ref={hostRef} className="absolute inset-0" />
         <Scenes3D editor={editor} />
         <Reveal editor={editor} />
         <SlideTextEdit editor={editor} />
+        <Overlays editor={editor} />
         {chrome && (
           <div className="pointer-events-none absolute inset-0">
             <EmptyState editor={editor} />
@@ -138,6 +163,7 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
             <Minimap editor={editor} />
             <Hud />
             <TeamBar editor={editor} />
+            <Voice editor={editor} />
           </div>
         )}
         <div className="pointer-events-none absolute inset-0">
@@ -165,6 +191,7 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
       {chrome && (
         <div className="pointer-events-none absolute inset-0">
           <TopBar editor={editor} onShare={() => setShareOpen(true)} />
+          <BranchBar editor={editor} />
           <LeftSidebar editor={editor} open={panels.left} onToggle={() => toggle("left")} />
           <Inspector editor={editor} open={panels.right} onToggle={() => toggle("right")} />
         </div>
@@ -173,6 +200,11 @@ export default function Board({ route }: { route: Extract<Route, { page: "board"
       <RadialMenu editor={editor} />
       <CommandPalette editor={editor} />
       <Studio editor={editor} />
+      <PhotoImport editor={editor} />
+      <PresenterView editor={editor} />
+      <CallDock editor={editor} />
+      <CommentThread editor={editor} />
+      <CommentsInbox editor={editor} />
       <TemplateGallery
         open={galleryOpen}
         onClose={() => useUiStore.getState().setGalleryOpen(false)}

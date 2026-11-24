@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { addEmbed, addPoll } from "../canvas/features";
+import { embedFromUrl } from "../canvas/widgets";
 import { CHART_THEMES, CHART_TYPE_NAMES, CHART_TYPES, chartSvg, parseChart, type ChartType } from "../canvas/charts";
 import type { Editor } from "../canvas/editor";
 import { sampleChart, SAMPLE_SLIDES } from "../canvas/samples";
@@ -95,6 +97,8 @@ export function InsertPanel({ editor }: { editor: Editor | null }) {
           </button>
         ))}
       </div>
+      <Title>Embeds & widgets</Title>
+      <Widgets editor={editor} />
       <Title>3D scenes</Title>
       <div className="grid grid-cols-2 gap-1.5 pb-3">
         {SCENE_PRESETS.map((p, i) => (
@@ -112,6 +116,68 @@ export function InsertPanel({ editor }: { editor: Editor | null }) {
             </span>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+const SAMPLE_CODE = [
+  "// Run fn once the calls stop for `wait` ms",
+  "export function debounce<T extends unknown[]>(fn: (...args: T) => void, wait = 200) {",
+  "  let timer: ReturnType<typeof setTimeout> | undefined;",
+  "  return (...args: T) => {",
+  "    clearTimeout(timer);",
+  "    timer = setTimeout(() => fn(...args), wait);",
+  "  };",
+  "}",
+].join("\n");
+
+/** Links (YouTube, Figma, any https page), code blocks and live polls. */
+function Widgets({ editor }: { editor: Editor }) {
+  const [url, setUrl] = useState("");
+  const [question, setQuestion] = useState("Which launch date works best?");
+  const [options, setOptions] = useState(["June 3", "June 17", "July 1"].join("\n"));
+  const field = "h-8 w-full rounded-lg border border-line bg-field px-2 text-[12px] text-ink outline-none focus:border-accent";
+  return (
+    <div className="space-y-2.5 px-1">
+      <div className="rounded-xl border border-line p-2">
+        <p className="mb-1.5 text-[11px] font-bold text-ink">🔗 Embed a link</p>
+        <div className="flex gap-1">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.stopPropagation()} placeholder="YouTube, Figma or any https link" className={field} />
+          <button
+            type="button"
+            onClick={() => {
+              const spec = embedFromUrl(url);
+              if (spec) {
+                addEmbed(editor, spec);
+                setUrl("");
+              } else useUiStore.getState().setNotice("Paste a full https:// link");
+            }}
+            className="shrink-0 rounded-lg bg-ink px-2.5 text-[11px] font-bold text-paper"
+          >
+            Add
+          </button>
+        </div>
+        <p className="mt-1 text-[10px] text-muted">Tip: paste a link straight onto the board.</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => addEmbed(editor, { type: "code", url: "", title: "debounce.ts", code: SAMPLE_CODE, language: "ts" })}
+        className="flex w-full items-center gap-2 rounded-xl border border-line p-2 text-left hover:border-accent"
+      >
+        <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#0f1220] font-mono text-[11px] font-bold text-[#c792ea]">{"</>"}</span>
+        <span>
+          <span className="block text-[11px] font-bold text-ink">Code block</span>
+          <span className="block text-[10px] text-muted">Syntax highlighted · double-click to edit</span>
+        </span>
+      </button>
+      <div className="rounded-xl border border-line p-2">
+        <p className="mb-1.5 text-[11px] font-bold text-ink">📊 Live poll</p>
+        <input value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => e.stopPropagation()} className={field} />
+        <textarea value={options} onChange={(e) => setOptions(e.target.value)} onKeyDown={(e) => e.stopPropagation()} rows={3} className="mt-1 w-full resize-none rounded-lg border border-line bg-field p-2 text-[12px] text-ink outline-none focus:border-accent" />
+        <button type="button" onClick={() => addPoll(editor, question, options.split("\n"))} className="mt-1 h-8 w-full rounded-lg bg-gradient-to-r from-[#5b8cff] to-[#b36bff] text-[11px] font-bold text-white">
+          Add poll · everyone votes live
+        </button>
       </div>
     </div>
   );

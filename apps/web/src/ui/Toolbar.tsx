@@ -87,6 +87,7 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
   const aiOpen = useUiStore((s) => s.aiOpen);
   const ritualsOpen = useUiStore((s) => s.ritualsOpen);
   const voting = useUiStore((s) => s.voting);
+  const voiceMode = useUiStore((s) => s.voice.mode);
   const locked = historyOpen || viewOnly;
   return (
     <AnimatePresence>
@@ -151,6 +152,16 @@ export function Toolbar({ editor }: { editor: Editor | null }) {
             >
               <Icon name="sparkle" className="h-4 w-4" />
               AI
+            </motion.button>
+            <motion.button
+              type="button"
+              title="Voice: say a command (or start meeting notes from ⌘K)"
+              disabled={!editor || locked}
+              onClick={() => useUiStore.getState().setVoice({ mode: useUiStore.getState().voice.mode === "off" ? "command" : "off", heard: "" })}
+              whileTap={{ scale: 0.92 }}
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[17px] transition-colors disabled:opacity-30 ${voiceMode !== "off" ? "bg-[#ff5c8a] text-white" : "hover:bg-hover"}`}
+            >
+              🎙️
             </motion.button>
             <IconButton icon="history" title={online ? "Time travel: browse and restore versions" : "History needs a connection"} disabled={!editor || !online} onClick={() => editor?.openHistory()} />
             <IconButton icon="command" title={`Command palette (${MOD}K)`} disabled={!editor} onClick={() => useUiStore.getState().setPaletteOpen(true)} />
