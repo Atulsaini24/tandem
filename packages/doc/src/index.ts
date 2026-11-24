@@ -21,6 +21,7 @@ export {
   type UndoResult,
   type PropValue,
   type PropsDelta,
+  type TextsDelta,
   type ShapeKind,
   type ShapeProps,
   type ShapeView,

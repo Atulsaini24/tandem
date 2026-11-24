@@ -24,6 +24,13 @@ export type EditCommand =
       readonly updates: ReadonlyArray<{ id: NodeId; patch: Partial<ShapeProps> }>;
       readonly group?: number;
     }
+  | {
+      readonly type: "editText";
+      readonly seq: number;
+      readonly id: NodeId;
+      readonly nextText: string;
+      readonly group?: number;
+    }
   | { readonly type: "delete"; readonly seq: number; readonly ids: readonly NodeId[]; readonly group?: number }
   | { readonly type: "front"; readonly seq: number; readonly ids: readonly NodeId[]; readonly group?: number }
   | { readonly type: "back"; readonly seq: number; readonly ids: readonly NodeId[]; readonly group?: number }

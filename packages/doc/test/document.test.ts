@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
+import { VersionVector } from "@canvas/crdt";
 import { CanvasDocument, formatPoints, parsePoints, type DocDelta, type ShapeProps } from "../src/index.js";
 
 const rect = (x = 0, y = 0): ShapeProps => ({ kind: "rect", x, y, w: 10, h: 10, fill: 0x2f63ff });
@@ -229,5 +230,45 @@ describe("team rituals", () => {
     bob.merge(alice.setTitle("Retro"));
     expect(bob.meta).toEqual({ title: "Retro", timerEnd: 1_000_000, timerTotal: 300_000, timerPaused: undefined });
     expect(() => alice.setMeta({ timerEnd: -1 })).toThrow(RangeError);
+  });
+});
+
+describe("collaborative FugueText labels & causal stability GC", () => {
+  it("simultaneous multi-user typing inside the same note never overwrites each other", () => {
+    const alice = new CanvasDocument("alice");
+    const bob = new CanvasDocument("bob");
+    alice.createShapes([{ id: "note1", props: { ...rect(), label: "Hello" } }]);
+    bob.merge(alice.state);
+
+    // Alice types " world" at the end while Bob concurrently types "!" at the end.
+    const dAlice = alice.editLabel("note1", { index: 5, deleteCount: 0, insert: " world" });
+    const dBob = bob.editLabel("note1", { index: 5, deleteCount: 0, insert: "!" });
+
+    alice.merge(dBob);
+    bob.merge(dAlice);
+
+    expect(alice.shape("note1")?.label).toBe(bob.shape("note1")?.label);
+    const merged = alice.shape("note1")?.label ?? "";
+    expect(merged).toContain("Hello");
+    expect(merged).toContain(" world");
+    expect(merged).toContain("!");
+  });
+
+  it("garbage-collects causally stable deleted shapes and tombstones", () => {
+    let clock = 10;
+    const alice = new CanvasDocument("alice", () => clock++);
+    const bob = new CanvasDocument("bob", () => clock++);
+
+    alice.createShapes([{ id: "s1", props: rect() }, { id: "s2", props: rect() }]);
+    bob.merge(alice.state);
+
+    alice.deleteShapes(["s1"]);
+    bob.merge(alice.state);
+
+    const horizon = VersionVector.stableHorizon([alice.versionVector, bob.versionVector]);
+    const stats = alice.gc(horizon);
+    expect(stats.shapesPurged).toBe(1);
+    expect(alice.shape("s1")).toBeUndefined();
+    expect(alice.shape("s2")).toBeDefined();
   });
 });

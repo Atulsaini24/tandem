@@ -119,6 +119,15 @@ describe("delta codec", () => {
     const forged = new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x80, 0x20]);
     expect(() => decodeDelta(forged)).toThrow(DecodeError);
   });
+
+  it("round-trips FugueText deltas inside DocDelta", () => {
+    const doc = new CanvasDocument("alice");
+    doc.createShapes([{ id: "note", props: { kind: "rect", x: 0, y: 0, w: 100, h: 100, fill: 0xffffff } }]);
+    const delta = doc.editLabel("note", { index: 0, deleteCount: 0, insert: "Hi 👋" });
+    const bytes = encodeDelta(delta);
+    const decoded = decodeDelta(bytes);
+    expect(decoded.texts).toEqual(delta.texts);
+  });
 });
 
 describe("messages", () => {

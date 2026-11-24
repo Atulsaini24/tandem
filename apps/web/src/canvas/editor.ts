@@ -386,7 +386,7 @@ export class Editor {
 
   setLabel(id: NodeId, label: string): void {
     const current = this.scene.get(id);
-    if (!current) return;
+    if (!current || this.locked) return;
     const clean = Array.from(label).slice(0, MAX_LABEL_CHARS).join("");
     // Text and comments with nothing in them have no reason to exist.
     if (!clean.trim() && (current.kind === "text" || current.kind === "comment")) {
@@ -394,7 +394,10 @@ export class Editor {
       return;
     }
     if ((current.label ?? "") === clean) return;
-    this.updateShapes([{ id, patch: { label: clean } }]);
+    this.#flush();
+    const seq = this.engine.nextSeq();
+    this.scene.updateLocal([{ id, patch: { label: clean } }], seq);
+    this.engine.send({ type: "editText", seq, id, nextText: clean });
   }
 
   /** Rename the board (synced to everyone on it). */

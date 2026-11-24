@@ -17,6 +17,7 @@ export { LWWRegister, mergeLWWEntry, type LWWEntry } from "./lww-register.js";
 export { LWWMap, mergeLWWMap, type LWWMapEntry, type LWWMapState } from "./lww-map.js";
 export { isValidPosition, positionBetween, positionsBetween } from "./fractional-index.js";
 export { FugueText, type CharId, type TextDelta, type TextInsert } from "./fugue-text.js";
+export { VersionVector, type ClockPosition } from "./version-vector.js";
 export {
   MoveTree,
   ROOT,

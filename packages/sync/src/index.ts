@@ -2,7 +2,7 @@
  * @canvas/sync — wire format, messages, presence and the client side of the sync
  * protocol. Isomorphic: runs in browsers, Web Workers and Node 22.
  */
-export { DecodeError, Reader, Writer, decodeDelta, encodeDelta, timestampsOf } from "./codec.js";
+export { DecodeError, Reader, Writer, decodeDelta, encodeDelta, textAuthorReplicasOf, timestampsOf } from "./codec.js";
 export {
   PROTOCOL_VERSION,
   decodeClientMessage,

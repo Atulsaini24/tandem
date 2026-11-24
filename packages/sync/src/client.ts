@@ -1,5 +1,6 @@
+import { VersionVector } from "@canvas/crdt";
 import type { DocDelta } from "@canvas/doc";
-import { decodeDelta, encodeDelta } from "./codec.js";
+import { decodeDelta, encodeDelta, timestampsOf } from "./codec.js";
 import { PROTOCOL_VERSION, decodeServerMessage, encodeClientMessage, type ServerMessage } from "./messages.js";
 
 /**
@@ -132,6 +133,8 @@ export class SyncClient {
     connects: 0,
   };
 
+  readonly versionVector = new VersionVector();
+
   readonly #options: SyncClientOptions;
   readonly #createSocket: (url: string) => SocketLike;
   #socket: SocketLike | undefined;
@@ -199,7 +202,8 @@ export class SyncClient {
 
   /** Queue a local delta, send it now if connected, and return it (for persistence). */
   push(delta: DocDelta): OutboxItem | undefined {
-    if (delta.tree.length === 0 && delta.props.length === 0) return undefined;
+    if (delta.tree.length === 0 && delta.props.length === 0 && (delta.texts?.length ?? 0) === 0) return undefined;
+    for (const ts of timestampsOf(delta)) this.versionVector.observe(ts);
     const item: OutboxItem = { clientSeq: this.#nextClientSeq++, bytes: encodeDelta(delta) };
     this.#outbox.push(item);
     this.#pump();
@@ -301,7 +305,11 @@ export class SyncClient {
         }
         // Merge first, then advance: if merging throws, the cursor stays put and the
         // reconnect that follows fetches this delta again instead of skipping it.
-        this.#options.onDelta(decodeDelta(message.delta), { serverSeq: message.serverSeq, bytes: message.delta });
+        {
+          const decoded = decodeDelta(message.delta);
+          for (const ts of timestampsOf(decoded)) this.versionVector.observe(ts);
+          this.#options.onDelta(decoded, { serverSeq: message.serverSeq, bytes: message.delta });
+        }
         this.#cursor = message.serverSeq;
         this.#emit();
         return;

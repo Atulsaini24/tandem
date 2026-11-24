@@ -1,4 +1,5 @@
 import { compareTimestamps, type HybridLogicalClock, type Timestamp } from "./hlc.js";
+import type { VersionVector } from "./version-vector.js";
 
 /**
  * One key's latest write. Deletes are recorded as tombstones (not removed), so a
@@ -73,6 +74,21 @@ export class LWWMap<V> {
   merge(delta: LWWMapState<V>): void {
     for (const entry of delta.values()) this.clock.observe(entry.ts);
     mergeInto(this.#entries, delta);
+  }
+
+  /**
+   * Garbage-collect tombstones that are causally stable (every replica has seen
+   * the delete, so no older `set` can ever arrive to resurrect the key).
+   */
+  gc(horizon: VersionVector): number {
+    let collected = 0;
+    for (const [key, entry] of this.#entries) {
+      if (entry.deleted && horizon.hasSeen(entry.ts)) {
+        this.#entries.delete(key);
+        collected += 1;
+      }
+    }
+    return collected;
   }
 
   #write(key: string, entry: LWWMapEntry<V>): LWWMapState<V> {

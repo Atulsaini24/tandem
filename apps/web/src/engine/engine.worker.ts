@@ -58,6 +58,8 @@ async function edit(replica: OfflineReplica, command: EditCommand): Promise<DocD
       return doc.createShapes(command.shapes, options);
     case "update":
       return doc.updateShapes(command.updates, options);
+    case "editText":
+      return doc.setLabelText(command.id, command.nextText, options);
     case "delete":
       return doc.deleteShapes(command.ids, options);
     case "front":

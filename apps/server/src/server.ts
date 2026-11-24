@@ -8,6 +8,7 @@ import {
   decodeDelta,
   encodeDelta,
   encodeServerMessage,
+  textAuthorReplicasOf,
   timestampsOf,
   type ClientMessage,
   type ServerMessage,
@@ -45,6 +46,8 @@ export interface SyncServerOptions {
   readonly snapshotEvery?: number;
   /** Catch a client up with a snapshot only if it's at least this many deltas behind it. */
   readonly snapshotMinGap?: number;
+  /** Evict an idle room (and unsubscribe from the bus) this many ms after its last client leaves. */
+  readonly roomIdleMs?: number;
 }
 
 export interface SyncStats {
@@ -65,6 +68,8 @@ export interface SyncStats {
 export interface SyncServer {
   readonly port: number;
   readonly stats: SyncStats;
+  /** Number of active rooms currently loaded in memory. */
+  roomCount(): number;
   /** Ordering diagnostics summed over rooms: deltas that arrived out of order, gaps filled from the store. */
   ordering(): { outOfOrder: number; gapFills: number };
   close(): Promise<void>;
@@ -133,8 +138,10 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
   const maxDriftMs = options.maxDriftMs ?? 60_000;
   const now = options.now ?? Date.now;
   const rooms = new Map<string, Room>();
+  const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const snapshotEvery = options.snapshotEvery ?? 500;
   const snapshotMinGap = options.snapshotMinGap ?? 50;
+  const roomIdleMs = options.roomIdleMs ?? 30_000;
   const stats: SyncStats = {
     connections: 0,
     pushes: 0,
@@ -247,7 +254,30 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
     }
   }
 
+  function cancelEviction(docId: string): void {
+    const timer = idleTimers.get(docId);
+    if (timer) {
+      clearTimeout(timer);
+      idleTimers.delete(docId);
+    }
+  }
+
+  function scheduleEviction(room: Room): void {
+    if (roomIdleMs <= 0) return;
+    cancelEviction(room.docId);
+    const timer = setTimeout(() => {
+      idleTimers.delete(room.docId);
+      if (room.clients.size > 0 || appendQueues.has(room) || rooms.get(room.docId) !== room) return;
+      rooms.delete(room.docId);
+      room.close();
+      void bus?.unsubscribe(room.docId);
+    }, roomIdleMs);
+    timer.unref();
+    idleTimers.set(room.docId, timer);
+  }
+
   function roomFor(docId: string): Room {
+    cancelEviction(docId);
     let room = rooms.get(docId);
     if (!room) {
       room = new Room(
@@ -352,6 +382,7 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
     const room = conn.room;
     if (!room) return;
     room.clients.delete(conn);
+    if (room.clients.size === 0) scheduleEviction(room);
     if (!conn.presence) return;
     const relay = encodeServerMessage({ type: "leave", clientId: conn.clientId });
     for (const other of room.clients) other.sendRaw(relay);
@@ -360,18 +391,22 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
 
   /** Validate untrusted bytes before they reach the log. Returns an error message or undefined. */
   function validate(conn: Connection, deltaBytes: Uint8Array): string | undefined {
-    let timestamps;
+    let decoded;
     try {
-      timestamps = timestampsOf(decodeDelta(deltaBytes));
+      decoded = decodeDelta(deltaBytes);
     } catch (error) {
       return error instanceof DecodeError ? `malformed delta: ${error.message}` : "malformed delta";
     }
+    const timestamps = timestampsOf(decoded);
     const limit = now() + maxDriftMs;
     for (const ts of timestamps) {
       // A client may only author ops as itself — no forging other replicas' edits.
       if (ts.replica !== conn.clientId) return "delta contains ops from another replica";
       // A timestamp far in the future would drag every client's HLC forward forever.
       if (ts.wall > limit) return "timestamp too far in the future (check the device clock)";
+    }
+    for (const replica of textAuthorReplicasOf(decoded)) {
+      if (replica !== conn.clientId) return "delta contains text ops from another replica";
     }
     return undefined;
   }
@@ -514,12 +549,15 @@ export async function startSyncServer(options: SyncServerOptions): Promise<SyncS
   return {
     port,
     stats,
+    roomCount: () => rooms.size,
     ordering: () =>
       [...rooms.values()].reduce(
         (sum, room) => ({ outOfOrder: sum.outOfOrder + room.stats.outOfOrder, gapFills: sum.gapFills + room.stats.gapFills }),
         { outOfOrder: 0, gapFills: 0 },
       ),
     close: async () => {
+      for (const timer of idleTimers.values()) clearTimeout(timer);
+      idleTimers.clear();
       for (const client of wss.clients) client.terminate();
       for (const room of rooms.values()) {
         room.close();

@@ -1,4 +1,5 @@
 import { compareTimestamps, type HybridLogicalClock, type Timestamp } from "./hlc.js";
+import type { VersionVector } from "./version-vector.js";
 
 /**
  * Replicated tree with a safe concurrent MOVE operation.
@@ -159,11 +160,86 @@ export class MoveTree {
 
   /** Delete = move to TRASH. The whole subtree goes with it. */
   delete(child: NodeId): TreeDelta {
-    return this.move(child, TRASH, "V");
+    return this.move(child, TRASH, "a0");
   }
 
   merge(delta: TreeDelta): void {
     for (const op of [...delta].sort(compareOps)) this.#integrate(op);
+  }
+
+  /**
+   * Garbage-collect causally stable deleted nodes (in TRASH with no remaining children)
+   * and compact superseded log entries within the causally stable prefix.
+   */
+  gc(horizon: VersionVector): number {
+    // Find the contiguous prefix [0..stableEnd) where every op is causally stable.
+    let stableEnd = 0;
+    while (stableEnd < this.#log.length) {
+      const entry = this.#log[stableEnd];
+      if (!entry || !horizon.hasSeen(entry.op.ts)) break;
+      stableEnd += 1;
+    }
+    if (stableEnd === 0) return 0;
+
+    // Any node referenced in the unstable tail [stableEnd..) must not be purged yet.
+    const referencedInTail = new Set<NodeId>();
+    for (let i = stableEnd; i < this.#log.length; i++) {
+      const entry = this.#log[i];
+      if (!entry) continue;
+      referencedInTail.add(entry.op.child);
+      referencedInTail.add(entry.op.parent);
+    }
+
+    // Track which ops in the stable prefix are the latest active placement for a node.
+    const activeOpTs = new Map<NodeId, string>();
+    for (const [id, ts] of this.#placedBy) {
+      activeOpTs.set(id, timestampKey(ts));
+    }
+
+    // Purge nodes that are in TRASH, have no children, and are not referenced in the unstable tail.
+    const purgedNodes = new Set<NodeId>();
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const id of this.#children.get(TRASH) ?? []) {
+        if (purgedNodes.has(id) || referencedInTail.has(id)) continue;
+        const hasChildren = (this.#children.get(id)?.size ?? 0) > 0;
+        if (hasChildren) continue;
+        const placedTs = this.#placedBy.get(id);
+        if (placedTs && horizon.hasSeen(placedTs)) {
+          purgedNodes.add(id);
+          this.#place(id, undefined);
+          this.#placedBy.delete(id);
+          changed = true;
+        }
+      }
+    }
+
+    // Compact the stable prefix: drop ops for purged nodes and superseded ops.
+    let collected = 0;
+    const keptPrefix: LogEntry[] = [];
+    for (let i = 0; i < stableEnd; i++) {
+      const entry = this.#log[i];
+      if (!entry) continue;
+      const child = entry.op.child;
+      if (purgedNodes.has(child)) {
+        collected += 1;
+        continue;
+      }
+      if (activeOpTs.get(child) !== timestampKey(entry.op.ts) && !referencedInTail.has(child)) {
+        collected += 1;
+        continue;
+      }
+      // Clear undo metadata for stable ops since we will never undo into the stable prefix.
+      keptPrefix.push({ op: entry.op, previous: undefined, previousTs: undefined });
+    }
+
+    if (collected > 0 || keptPrefix.length < stableEnd) {
+      const tail = this.#log.slice(stableEnd);
+      this.#log.length = 0;
+      this.#log.push(...keptPrefix, ...tail);
+    }
+    return collected;
   }
 
   #integrate(op: MoveOp): void {

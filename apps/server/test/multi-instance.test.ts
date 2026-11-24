@@ -216,3 +216,26 @@ describe("signals (call setup)", () => {
     expect(inbox.b).toHaveLength(1);
   });
 });
+
+describe("room idle eviction", () => {
+  it("evicts inactive rooms after all clients disconnect and reloads seamlessly on rejoin", async () => {
+    const store = new MemoryStore();
+    const hub = new MemoryBusHub();
+    const server = await startSyncServer({ store, bus: hub.connect("i0"), roomIdleMs: 50 });
+    cleanup.push(() => server.close());
+
+    const alice = peer(server, "alice", "ephemeral-doc");
+    await until(() => alice.client.status === "online", "online");
+    alice.edit((d) => d.createShapes([{ id: "s1", props: rect() }]));
+    await until(() => alice.client.pending === 0, "acked");
+    expect(server.roomCount()).toBe(1);
+
+    alice.client.stop();
+    await until(() => server.roomCount() === 0, "room evicted after idle timeout");
+
+    const bob = peer(server, "bob", "ephemeral-doc");
+    await until(() => bob.client.status === "online", "rejoined");
+    expect(bob.doc.shape("s1")).toBeDefined();
+    expect(server.roomCount()).toBe(1);
+  });
+});

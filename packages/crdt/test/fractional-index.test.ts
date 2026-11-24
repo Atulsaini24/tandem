@@ -24,6 +24,26 @@ describe("positionsBetween", () => {
     const keys = positionsBetween(null, null, 5_000);
     expect(Math.max(...keys.map((key) => key.length))).toBeLessThanOrEqual(6);
   });
+
+  it("keeps keys O(log N) under 1,000 repeated appends and prepends", () => {
+    let tail = positionBetween(null, null);
+    for (let i = 0; i < 1_000; i++) {
+      const next = positionBetween(tail, null);
+      expect(next > tail).toBe(true);
+      expect(isValidPosition(next)).toBe(true);
+      tail = next;
+    }
+    expect(tail.length).toBeLessThanOrEqual(3);
+
+    let head = positionBetween(null, null);
+    for (let i = 0; i < 1_000; i++) {
+      const prev = positionBetween(null, head);
+      expect(prev < head).toBe(true);
+      expect(isValidPosition(prev)).toBe(true);
+      head = prev;
+    }
+    expect(head.length).toBeLessThanOrEqual(3);
+  });
 });
 
 describe("positionBetween", () => {
@@ -50,10 +70,12 @@ describe("positionBetween", () => {
   });
 
   it("rejects invalid or out-of-order bounds", () => {
-    expect(() => positionBetween("b", "a")).toThrow(RangeError);
-    expect(() => positionBetween("a", "a")).toThrow(RangeError);
-    expect(() => positionBetween("a0", null)).toThrow(RangeError); // trailing zero
-    expect(() => positionBetween("a-", null)).toThrow(RangeError); // bad digit
+    expect(() => positionBetween("a1", "a0")).toThrow(RangeError);
+    expect(() => positionBetween("a0", "a0")).toThrow(RangeError);
+    expect(() => positionBetween("a00", null)).toThrow(RangeError); // trailing zero in fraction
+    expect(() => positionBetween("a", null)).toThrow(RangeError); // missing integer digit
+    expect(() => positionBetween("b0", null)).toThrow(RangeError); // incomplete 2-digit integer
+    expect(() => positionBetween("a0-", null)).toThrow(RangeError); // bad digit
   });
 
   it("any sequence of inserts at random indexes stays strictly ordered and valid", () => {

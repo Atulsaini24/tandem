@@ -40,6 +40,34 @@ function EditorBox({ editor, id }: { editor: Editor; id: string }) {
   }, []);
 
   useEffect(() => {
+    // Sync remote FugueText edits into the open textarea without clobbering the user's cursor.
+    let lastVersion = editor.scene.version;
+    const timer = setInterval(() => {
+      if (editor.scene.version === lastVersion) return;
+      lastVersion = editor.scene.version;
+      const remoteLabel = editor.scene.get(id)?.label;
+      if (remoteLabel === undefined) return;
+      setValue((prev) => {
+        if (prev === remoteLabel) return prev;
+        const node = ref.current;
+        if (node && document.activeElement === node) {
+          const start = node.selectionStart ?? prev.length;
+          const end = node.selectionEnd ?? prev.length;
+          requestAnimationFrame(() => {
+            if (ref.current) {
+              const clampedStart = Math.min(start, remoteLabel.length);
+              const clampedEnd = Math.min(end, remoteLabel.length);
+              ref.current.setSelectionRange(clampedStart, clampedEnd);
+            }
+          });
+        }
+        return remoteLabel;
+      });
+    }, 100);
+    return () => clearInterval(timer);
+  }, [editor, id]);
+
+  useEffect(() => {
     // Follow the shape if the camera moves while typing.
     let raf = 0;
     let last = "";

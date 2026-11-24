@@ -1,4 +1,4 @@
-import type { LWWMapEntry, MoveOp, NodeId, Timestamp } from "@canvas/crdt";
+import type { CharId, LWWMapEntry, MoveOp, NodeId, TextDelta, TextInsert, Timestamp } from "@canvas/crdt";
 import type { DocDelta, PropValue } from "@canvas/doc";
 
 /**
@@ -231,6 +231,32 @@ export function encodeDelta(delta: DocDelta): Uint8Array {
     }
   }
 
+  if (delta.texts && delta.texts.length > 0) {
+    body.uint(delta.texts.length);
+    for (const [id, textDelta] of delta.texts) {
+      body.uint(ref(id));
+      body.uint(textDelta.inserts.length);
+      for (const ins of textDelta.inserts) {
+        body.uint(ref(ins.id.replica));
+        body.uint(ins.id.counter);
+        body.uint(ref(ins.value));
+        if (ins.parent) {
+          body.byte(1);
+          body.uint(ref(ins.parent.replica));
+          body.uint(ins.parent.counter);
+        } else {
+          body.byte(0);
+        }
+        body.byte(ins.side === "left" ? 0 : 1);
+      }
+      body.uint(textDelta.deletes.length);
+      for (const del of textDelta.deletes) {
+        body.uint(ref(del.replica));
+        body.uint(del.counter);
+      }
+    }
+  }
+
   const out = new Writer();
   out.uint(table.length);
   for (const value of table) out.str(value);
@@ -270,13 +296,47 @@ export function decodeDelta(bytes: Uint8Array): DocDelta {
     }
     props.push([id, entries]);
   }
+  const texts: Array<readonly [NodeId, TextDelta]> = [];
+  if (r.remaining > 0) {
+    for (let i = r.count(3); i > 0; i--) {
+      const id = ref();
+      const inserts: TextInsert[] = [];
+      for (let j = r.count(5); j > 0; j--) {
+        const replica = ref();
+        const counter = r.uint();
+        const value = ref();
+        const hasParent = r.byte();
+        let parent: CharId | null = null;
+        if (hasParent === 1) parent = { replica: ref(), counter: r.uint() };
+        else if (hasParent !== 0) throw new DecodeError(`invalid parent flag ${hasParent}`);
+        const sideByte = r.byte();
+        if (sideByte !== 0 && sideByte !== 1) throw new DecodeError(`invalid side ${sideByte}`);
+        inserts.push({ id: { replica, counter }, value, parent, side: sideByte === 0 ? "left" : "right" });
+      }
+      const deletes: CharId[] = [];
+      for (let j = r.count(2); j > 0; j--) {
+        deletes.push({ replica: ref(), counter: r.uint() });
+      }
+      texts.push([id, { inserts, deletes }]);
+    }
+  }
   r.end();
-  return { tree, props };
+  return texts.length > 0 ? { tree, props, texts } : { tree, props };
 }
 
 /** Every timestamp in a delta (for server-side validation). */
 export function timestampsOf(delta: DocDelta): Timestamp[] {
   const out: Timestamp[] = delta.tree.map((op) => op.ts);
   for (const [, entries] of delta.props) for (const entry of entries.values()) out.push(entry.ts);
+  return out;
+}
+
+/** Every replica id that authored inserts in `delta.texts` (for server-side validation). */
+export function textAuthorReplicasOf(delta: DocDelta): string[] {
+  const out: string[] = [];
+  if (!delta.texts) return out;
+  for (const [, textDelta] of delta.texts) {
+    for (const ins of textDelta.inserts) out.push(ins.id.replica);
+  }
   return out;
 }

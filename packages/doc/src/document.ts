@@ -1,9 +1,11 @@
 import {
+  FugueText,
   HybridLogicalClock,
   LWWMap,
   MoveTree,
   ROOT,
   TreeCycleError,
+  VersionVector,
   compareTimestamps,
   positionsBetween,
   type LWWMapEntry,
@@ -12,6 +14,7 @@ import {
   type NodeId,
   type PhysicalClock,
   type ReplicaId,
+  type TextDelta,
   type Timestamp,
   type TreeDelta,
   type TreeNode,
@@ -87,10 +90,12 @@ export const MAX_REPLY_VALUE = 4000;
 
 export type PropValue = string | number;
 export type PropsDelta = ReadonlyArray<readonly [NodeId, LWWMapState<PropValue>]>;
+export type TextsDelta = ReadonlyArray<readonly [NodeId, TextDelta]>;
 
 export interface DocDelta {
   readonly tree: TreeDelta;
   readonly props: PropsDelta;
+  readonly texts?: TextsDelta;
 }
 
 export const EMPTY_DELTA: DocDelta = { tree: [], props: [] };
@@ -124,11 +129,12 @@ export const META_ID = "__meta__";
 export const MAX_TITLE_CHARS = 120;
 const MAX_UNDO = 200;
 
-/** Every shape id a delta touches: its structure, its properties, or both. */
+/** Every shape id a delta touches: its structure, its properties, or its text. */
 export function touchedIds(delta: DocDelta): Set<NodeId> {
   const ids = new Set<NodeId>();
   for (const op of delta.tree) ids.add(op.child);
   for (const [id] of delta.props) ids.add(id);
+  if (delta.texts) for (const [id] of delta.texts) ids.add(id);
   return ids;
 }
 
@@ -191,7 +197,7 @@ export function formatPoints(points: ReadonlyArray<{ x: number; y: number }>): s
  * Read a shape from its property map. Remote data is untrusted, so anything
  * incomplete or malformed is treated as "not a renderable shape" rather than a crash.
  */
-function readShape(id: NodeId, props: LWWMap<PropValue>): ShapeView | undefined {
+function readShape(id: NodeId, props: LWWMap<PropValue>, fugue?: FugueText): ShapeView | undefined {
   const kind = props.get("kind");
   const [x, y, w, h, fill] = (["x", "y", "w", "h", "fill"] as const).map((key) => props.get(key));
   if (typeof kind !== "string" || !(SHAPE_KINDS as readonly string[]).includes(kind)) return undefined;
@@ -205,6 +211,11 @@ function readShape(id: NodeId, props: LWWMap<PropValue>): ShapeView | undefined 
   if (typeof w !== "number" || typeof h !== "number" || typeof fill !== "number") return undefined;
   const view: Record<string, PropValue> = { id, kind, x, y, w, h, fill };
   for (const [key, empty] of Object.entries(OPTIONAL_KEYS)) {
+    if (key === "label" && fugue !== undefined) {
+      const text = fugue.toString();
+      if (text !== "") view.label = text;
+      continue;
+    }
     const value = props.get(key);
     if (value !== undefined && value !== empty && typeof value === typeof empty) view[key] = value;
   }
@@ -259,8 +270,10 @@ const propKey = (id: NodeId, key: string): string => `${id}\u0000${key}`;
 
 export class CanvasDocument {
   readonly clock: HybridLogicalClock;
+  readonly versionVector = new VersionVector();
   readonly #tree: MoveTree;
   readonly #props = new Map<NodeId, LWWMap<PropValue>>();
+  readonly #texts = new Map<NodeId, FugueText>();
   #undoStack: UndoEntry[] = [];
   #redoStack: UndoEntry[] = [];
 
@@ -269,11 +282,16 @@ export class CanvasDocument {
     this.#tree = new MoveTree(this.clock);
   }
 
-  /** Full state of both CRDTs, ready to send to a peer or persist. */
+  /** Full state of all CRDTs, ready to send to a peer or persist. */
   get state(): DocDelta {
-    return {
+    const base: DocDelta = {
       tree: this.#tree.ops,
       props: [...this.#props].map(([id, map]) => [id, map.state] as const),
+    };
+    if (this.#texts.size === 0) return base;
+    return {
+      ...base,
+      texts: [...this.#texts].map(([id, text]) => [id, text.state] as const),
     };
   }
 
@@ -501,18 +519,123 @@ export class CanvasDocument {
     return result;
   }
 
+  /**
+   * Collaborative text edit on a shape's label using FugueText CRDT.
+   * Multiple users typing simultaneously in the same sticky note/shape converge
+   * without overwriting each other's characters.
+   */
+  editLabel(
+    id: NodeId,
+    edit: { readonly index: number; readonly deleteCount: number; readonly insert: string },
+    options?: EditOptions,
+  ): DocDelta {
+    if (!this.#props.has(id) || id === META_ID) return EMPTY_DELTA;
+    let fugue = this.#texts.get(id);
+    const inserts = [];
+    const deletes = [];
+
+    if (!fugue) {
+      fugue = new FugueText(this.clock.replica);
+      this.#texts.set(id, fugue);
+      const legacy = this.#props.get(id)?.get("label");
+      if (typeof legacy === "string" && legacy.length > 0) {
+        const seed = fugue.insert(0, legacy);
+        inserts.push(...seed.inserts);
+      }
+    }
+
+    const len = fugue.length;
+    const index = Math.max(0, Math.min(len, edit.index));
+    const deleteCount = Math.max(0, Math.min(len - index, edit.deleteCount));
+
+    if (deleteCount > 0) {
+      const del = fugue.delete(index, deleteCount);
+      deletes.push(...del.deletes);
+    }
+
+    if (edit.insert.length > 0) {
+      const existingChars = Array.from(fugue.toString()).length;
+      const maxAdd = Math.max(0, MAX_LABEL_CHARS - existingChars);
+      const textToInsert = Array.from(edit.insert).slice(0, maxAdd).join("");
+      if (textToInsert.length > 0) {
+        const ins = fugue.insert(index, textToInsert);
+        inserts.push(...ins.inserts);
+      }
+    }
+
+    void options;
+    if (inserts.length === 0 && deletes.length === 0) return EMPTY_DELTA;
+    return { tree: [], props: [], texts: [[id, { inserts, deletes }]] };
+  }
+
+  /**
+   * Diff `nextText` against the shape's current label and apply the minimal
+   * FugueText delete + insert splice.
+   */
+  setLabelText(id: NodeId, nextText: string, options?: EditOptions): DocDelta {
+    const current = this.shape(id)?.label ?? "";
+    const curChars = Array.from(current);
+    const nextChars = Array.from(nextText).slice(0, MAX_LABEL_CHARS);
+
+    let prefix = 0;
+    while (prefix < curChars.length && prefix < nextChars.length && curChars[prefix] === nextChars[prefix]) {
+      prefix += 1;
+    }
+
+    let suffix = 0;
+    while (
+      suffix < curChars.length - prefix &&
+      suffix < nextChars.length - prefix &&
+      curChars[curChars.length - 1 - suffix] === nextChars[nextChars.length - 1 - suffix]
+    ) {
+      suffix += 1;
+    }
+
+    const deleteCount = curChars.length - prefix - suffix;
+    const insert = nextChars.slice(prefix, nextChars.length - suffix).join("");
+    return this.editLabel(id, { index: prefix, deleteCount, insert }, options);
+  }
+
   /** Apply a delta from another replica. Returns the ids whose view may have changed. */
   merge(delta: DocDelta): Set<NodeId> {
     this.#tree.merge(delta.tree);
     for (const [id, state] of delta.props) this.#propsOf(id).merge(state);
+    if (delta.texts) {
+      for (const [id, textDelta] of delta.texts) this.#textOf(id).merge(textDelta);
+    }
+    this.#observeDelta(delta);
     return touchedIds(delta);
+  }
+
+  /**
+   * Garbage-collect causally stable deleted tree nodes and LWW tombstones using
+   * the sync layer's causal stability horizon.
+   */
+  gc(horizon: VersionVector): { treeOpsCollected: number; tombstonesCollected: number; shapesPurged: number } {
+    const treeOpsCollected = this.#tree.gc(horizon);
+    let tombstonesCollected = 0;
+    let shapesPurged = 0;
+
+    for (const [id, map] of this.#props) {
+      tombstonesCollected += map.gc(horizon);
+      if (id !== META_ID && !this.#tree.get(id)) {
+        const allStable = [...map.state.values()].every((entry) => horizon.hasSeen(entry.ts));
+        if (allStable) {
+          this.#props.delete(id);
+          this.#texts.delete(id);
+          shapesPurged += 1;
+        }
+      }
+    }
+
+    return { treeOpsCollected, tombstonesCollected, shapesPurged };
   }
 
   /** The shape as it should render, or undefined if deleted / not (yet) complete. */
   shape(id: NodeId): ShapeView | undefined {
     if (!this.#tree.isAttached(id)) return undefined;
     const props = this.#props.get(id);
-    return props && readShape(id, props);
+    return props && readShape(id, props, this.#texts.get(id));
   }
 
   /** Every visible shape, back to front (render order). */
@@ -521,7 +644,7 @@ export class CanvasDocument {
     const stack = this.#tree.children(ROOT).reverse();
     for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
       const props = this.#props.get(id);
-      const view = props && readShape(id, props);
+      const view = props && readShape(id, props, this.#texts.get(id));
       if (view) out.push(view);
       stack.push(...this.#tree.children(id).reverse());
     }
@@ -540,6 +663,7 @@ export class CanvasDocument {
       const before = props.get(key);
       const beforeTs = props.state.get(key)?.ts;
       for (const [k, entry] of props.set(key, value)) {
+        this.versionVector.observe(entry.ts);
         delta.set(k, entry);
         changes.props.push({ id, key: k, ts: entry.ts, before, beforeTs });
       }
@@ -552,7 +676,10 @@ export class CanvasDocument {
     const before = this.#tree.get(id);
     const beforeTs = this.#tree.placedBy(id);
     const ops = [...this.#tree.move(id, parent, position)];
-    for (const op of ops) changes.tree.push({ id, ts: op.ts, before, beforeTs });
+    for (const op of ops) {
+      this.versionVector.observe(op.ts);
+      changes.tree.push({ id, ts: op.ts, before, beforeTs });
+    }
     return ops;
   }
 
@@ -561,7 +688,10 @@ export class CanvasDocument {
     const before = this.#tree.get(id);
     const beforeTs = this.#tree.placedBy(id);
     const ops = [...this.#tree.delete(id)];
-    for (const op of ops) changes.tree.push({ id, ts: op.ts, before, beforeTs });
+    for (const op of ops) {
+      this.versionVector.observe(op.ts);
+      changes.tree.push({ id, ts: op.ts, before, beforeTs });
+    }
     return ops;
   }
 
@@ -677,6 +807,22 @@ export class CanvasDocument {
       this.#props.set(id, props);
     }
     return props;
+  }
+
+  #textOf(id: NodeId): FugueText {
+    let text = this.#texts.get(id);
+    if (!text) {
+      text = new FugueText(this.clock.replica);
+      this.#texts.set(id, text);
+    }
+    return text;
+  }
+
+  #observeDelta(delta: DocDelta): void {
+    for (const op of delta.tree) this.versionVector.observe(op.ts);
+    for (const [, entries] of delta.props) {
+      for (const entry of entries.values()) this.versionVector.observe(entry.ts);
+    }
   }
 
   #lastPosition(parent: NodeId): string | null {
